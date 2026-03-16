@@ -1,12 +1,21 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sync"
+
+	"cpp-sbom-builder/internal/detector"
+	"cpp-sbom-builder/internal/formatter"
+	"cpp-sbom-builder/internal/merger"
+	"cpp-sbom-builder/internal/walker"
 )
 
-// Execute parses CLI flags and runs the tool.
+// Execute parses CLI flags and runs the full SBOM pipeline.
 func Execute() {
 	fs := flag.NewFlagSet("cpp-sbom-builder", flag.ContinueOnError)
 
@@ -17,9 +26,6 @@ func Execute() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Suppress "output declared but not used" until later tasks wire it up.
-	_ = output
 
 	if *dir == "" {
 		fmt.Fprintf(os.Stderr, "error: --dir is required\n\n")
@@ -33,5 +39,91 @@ func Execute() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Scan starting...")
+	if err := run(*dir, *output); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// run executes the full pipeline and is separated from Execute so that
+// integration tests can call it directly without touching os.Exit.
+func Run(dir, outputPath string) error {
+	ctx := context.Background()
+
+	// ── Step 1: Walk the project tree ────────────────────────────────────────
+	_, err := walker.Walk(dir)
+	if err != nil {
+		return fmt.Errorf("walking %q: %w", dir, err)
+	}
+
+	// ── Step 2: Run all detectors concurrently ───────────────────────────────
+	detectors := []detector.Detector{
+		detector.CMakeDetector{},
+		detector.VcpkgDetector{},
+		detector.ConanDetector{},
+		detector.IncludeScanner{},
+	}
+
+	type detResult struct {
+		deps []detector.Dependency
+		err  error
+	}
+
+	resultsCh := make(chan detResult, len(detectors))
+	var wg sync.WaitGroup
+
+	for _, d := range detectors {
+		d := d
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			deps, err := d.Detect(ctx, dir)
+			resultsCh <- detResult{deps: deps, err: err}
+		}()
+	}
+
+	// Close channel once all detectors finish.
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	var allResults [][]detector.Dependency
+	for r := range resultsCh {
+		if r.err != nil {
+			// Log detector errors but continue — one failing detector should
+			// not abort the whole scan.
+			fmt.Fprintf(os.Stderr, "warning: detector error: %v\n", r.err)
+			continue
+		}
+		allResults = append(allResults, r.deps)
+	}
+
+	// ── Step 3: Merge ─────────────────────────────────────────────────────────
+	merged := merger.Merge(allResults)
+
+	// ── Step 4: Format ────────────────────────────────────────────────────────
+	projectName := filepath.Base(dir)
+	report, err := formatter.Format(merged, projectName)
+	if err != nil {
+		return fmt.Errorf("formatting SBOM: %w", err)
+	}
+
+	// ── Step 5: Write output ─────────────────────────────────────────────────
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serialising SBOM: %w", err)
+	}
+
+	if err := os.WriteFile(outputPath, data, 0o644); err != nil {
+		return fmt.Errorf("writing %q: %w", outputPath, err)
+	}
+
+	fmt.Printf("SBOM written to %s\n", outputPath)
+	return nil
+}
+
+// run is the unexported wrapper called by Execute.
+func run(dir, outputPath string) error {
+	return Run(dir, outputPath)
 }
