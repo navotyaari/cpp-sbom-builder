@@ -3,6 +3,7 @@ package detector
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"strings"
@@ -27,7 +28,7 @@ func (c ConanDetector) Detect(ctx context.Context, root string) ([]Dependency, e
 
 		found, parseErr := parseConanFile(path)
 		if parseErr != nil {
-			// Unreadable file — skip silently, consistent with other detectors.
+			fmt.Fprintf(os.Stderr, "conan detector: skipping %s: %v\n", path, parseErr)
 			return nil
 		}
 
