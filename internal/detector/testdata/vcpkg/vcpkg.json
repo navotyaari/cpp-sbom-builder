@@ -1,0 +1,14 @@
+{
+  "name": "my-cpp-app",
+  "version": "1.0.0",
+  "dependencies": [
+    "zlib",
+    {
+      "name": "openssl",
+      "version": "1.1.1"
+    },
+    {
+      "name": "fmt"
+    }
+  ]
+}
