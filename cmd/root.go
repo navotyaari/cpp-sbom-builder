@@ -35,9 +35,8 @@ func Execute() {
 		os.Exit(1)
 	}
 
-	info, err := os.Stat(*dir)
-	if err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "error: --dir path does not exist or is not a directory: %q\n", *dir)
+	if err := validateDir(*dir); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -48,6 +47,18 @@ func Execute() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// validateDir checks that dir is a non-empty path that exists and is a
+// directory. It returns a descriptive error suitable for display to the user.
+// The empty-string case is intentionally not handled here; Execute() catches
+// that before calling validateDir so it can also print fs.Usage().
+func validateDir(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("--dir path does not exist or is not a directory: %q", dir)
+	}
+	return nil
 }
 
 // Run executes the full SBOM pipeline. It is exported so that integration
