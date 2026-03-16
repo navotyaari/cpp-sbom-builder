@@ -47,13 +47,7 @@ type fileResult struct {
 func (s IncludeScanner) Detect(ctx context.Context, root string) ([]Dependency, error) {
 	// Collect all candidate file paths first so we know total work upfront.
 	var files []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if path == root {
-				return err
-			}
-			return nil
-		}
+	err := walkDir(ctx, root, func(path string, d fs.DirEntry) error {
 		if !d.IsDir() && cppExtensions[strings.ToLower(filepath.Ext(d.Name()))] {
 			files = append(files, path)
 		}

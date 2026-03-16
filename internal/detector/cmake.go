@@ -33,21 +33,7 @@ func (c CMakeDetector) Detect(ctx context.Context, root string) ([]Dependency, e
 	// (same package in multiple files) are merged into one entry.
 	deps := map[string]*Dependency{}
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if path == root {
-				return err
-			}
-			return nil // skip unreadable entries
-		}
-
-		// Honour context cancellation between files.
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
+	err := walkDir(ctx, root, func(path string, d fs.DirEntry) error {
 		if d.IsDir() {
 			return nil
 		}

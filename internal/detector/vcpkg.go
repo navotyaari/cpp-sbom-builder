@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -37,20 +36,7 @@ type vcpkgDepObject struct {
 func (v VcpkgDetector) Detect(ctx context.Context, root string) ([]Dependency, error) {
 	var deps []Dependency
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if path == root {
-				return err
-			}
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
+	err := walkDir(ctx, root, func(path string, d fs.DirEntry) error {
 		if d.IsDir() || d.Name() != "vcpkg.json" {
 			return nil
 		}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -21,20 +20,7 @@ func (c ConanDetector) Name() string { return "conan" }
 func (c ConanDetector) Detect(ctx context.Context, root string) ([]Dependency, error) {
 	var deps []Dependency
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if path == root {
-				return err
-			}
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
+	err := walkDir(ctx, root, func(path string, d fs.DirEntry) error {
 		if d.IsDir() || d.Name() != "conanfile.txt" {
 			return nil
 		}
