@@ -38,14 +38,14 @@ func Execute() {
 		os.Exit(1)
 	}
 
-	if err := run(*dir, *output); err != nil {
+	if err := Run(*dir, *output); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-// run executes the full pipeline and is separated from Execute so that
-// integration tests can call it directly without touching os.Exit.
+// Run executes the full SBOM pipeline. It is exported so that integration
+// tests can call it directly without going through Execute or touching os.Exit.
 func Run(dir, outputPath string) error {
 	ctx := context.Background()
 
@@ -114,9 +114,4 @@ func Run(dir, outputPath string) error {
 
 	fmt.Printf("SBOM written to %s\n", outputPath)
 	return nil
-}
-
-// run is the unexported wrapper called by Execute.
-func run(dir, outputPath string) error {
-	return Run(dir, outputPath)
 }
