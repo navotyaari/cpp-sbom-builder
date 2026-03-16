@@ -3,6 +3,7 @@ package detector
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -106,5 +107,8 @@ func parseCMakeFile(path string, deps map[string]*Dependency) error {
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "cmake detector: skipping %s: %v\n", path, err)
+	}
+	return nil
 }
