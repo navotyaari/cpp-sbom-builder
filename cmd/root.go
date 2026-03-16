@@ -12,7 +12,6 @@ import (
 	"cpp-sbom-builder/internal/detector"
 	"cpp-sbom-builder/internal/formatter"
 	"cpp-sbom-builder/internal/merger"
-	"cpp-sbom-builder/internal/walker"
 )
 
 // Execute parses CLI flags and runs the full SBOM pipeline.
@@ -50,13 +49,7 @@ func Execute() {
 func Run(dir, outputPath string) error {
 	ctx := context.Background()
 
-	// ── Step 1: Walk the project tree ────────────────────────────────────────
-	_, err := walker.Walk(dir)
-	if err != nil {
-		return fmt.Errorf("walking %q: %w", dir, err)
-	}
-
-	// ── Step 2: Run all detectors concurrently ───────────────────────────────
+	// ── Step 1: Run all detectors concurrently ───────────────────────────────
 	detectors := []detector.Detector{
 		detector.CMakeDetector{},
 		detector.VcpkgDetector{},
@@ -99,17 +92,17 @@ func Run(dir, outputPath string) error {
 		allResults = append(allResults, r.deps)
 	}
 
-	// ── Step 3: Merge ─────────────────────────────────────────────────────────
+	// ── Step 2: Merge ─────────────────────────────────────────────────────────
 	merged := merger.Merge(allResults)
 
-	// ── Step 4: Format ────────────────────────────────────────────────────────
+	// ── Step 3: Format ────────────────────────────────────────────────────────
 	projectName := filepath.Base(dir)
 	report, err := formatter.Format(merged, projectName)
 	if err != nil {
 		return fmt.Errorf("formatting SBOM: %w", err)
 	}
 
-	// ── Step 5: Write output ─────────────────────────────────────────────────
+	// ── Step 4: Write output ─────────────────────────────────────────────────
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("serialising SBOM: %w", err)
