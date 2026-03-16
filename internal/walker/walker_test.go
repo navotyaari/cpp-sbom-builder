@@ -140,8 +140,41 @@ func TestWalk_NestedFilteredDirSkipped(t *testing.T) {
 
 	got := sortedWalk(t, root)
 
+	// skipDirNames mirrors the skipDirs map in walker.go and is the source of
+	// truth for which directory names must never appear as a path component in
+	// the results.  Keep this in sync with walker.go if new names are added.
+	skipDirNames := map[string]bool{
+		".git":                true,
+		"build":               true,
+		"cmake-build-debug":   true,
+		"cmake-build-release": true,
+		"node_modules":        true,
+		".cache":              true,
+	}
+
+	// hasSkippedComponent returns true if any component of path p matches a
+	// name in skipDirNames, regardless of how deeply it is nested.
+	hasSkippedComponent := func(p string) bool {
+		// Walk every component of the path (file name included, since a file
+		// could theoretically share a filtered name, but in practice this only
+		// fires on directory components).
+		for p != "" {
+			dir, base := filepath.Split(filepath.Clean(p))
+			if skipDirNames[base] {
+				return true
+			}
+			// filepath.Split on a root like "/" returns ("", "/") — stop when
+			// we can no longer make progress.
+			if dir == p {
+				break
+			}
+			p = filepath.Clean(dir)
+		}
+		return false
+	}
+
 	for _, p := range got {
-		if filepath.Base(filepath.Dir(p)) == "build" {
+		if hasSkippedComponent(p) {
 			t.Errorf("file inside nested filtered dir should be excluded: %q", p)
 		}
 	}
