@@ -114,6 +114,7 @@ A generated `sbom.json` looks like this (abbreviated):
 ## Known limitations
 
 - **No build-system execution.** Dependency resolution is purely static. Conditional CMake blocks (`if(WIN32) ... find_package(...)`) are not evaluated; all `find_package` calls are treated as active.
+- **Multi-line `find_package()` calls not detected.** The CMake detector matches `find_package()` with a single-line regex. Invocations split across multiple lines — a common style for long argument lists — are silently missed.
 - **Include scanner is low-confidence.** `#include` scanning cannot determine versions. Any header-only or single-file library that ships alongside the project source will produce a false-positive entry with `version: "unknown"`.
 - **conanfile.py not supported.** Only the plain-text `conanfile.txt` format is parsed. Python-based Conan manifests require a Python interpreter to evaluate and are out of scope.
 - **No transitive dependencies.** The tool detects only direct dependencies declared in manifests or `#include`d headers. Transitive (indirect) dependencies are not resolved.

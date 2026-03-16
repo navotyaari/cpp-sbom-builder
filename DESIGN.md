@@ -15,7 +15,7 @@
 
 **vcpkg** and **Conan** are the most reliable sources because they are explicit, machine-generated package manifests with structured name and version fields. Versions declared there are authoritative.
 
-**CMake** is a strong signal for which libraries the project *intends* to link, but version information depends on the developer having written `find_package(OpenSSL 1.1 REQUIRED)` rather than just `find_package(OpenSSL REQUIRED)`. Many real CMakeLists.txt files omit the version argument.
+**CMake** is a strong signal for which libraries the project *intends* to link, but version information depends on the developer having written `find_package(OpenSSL 1.1 REQUIRED)` rather than just `find_package(OpenSSL REQUIRED)`. Many real CMakeLists.txt files omit the version argument. The detector matches `find_package()` with a single-line regex; invocations split across multiple lines are not detected.
 
 **IncludeScanner** is a best-effort fallback. It finds libraries that no manifest lists — e.g. a vendored header-only library checked directly into `include/` — but it cannot determine versions and produces a higher false-positive rate.
 
@@ -55,6 +55,7 @@ Two rules are applied in `scanFileIncludes`:
 - **Vendored header-only libraries.** A project that copies `nlohmann/json.hpp` or `stb_image.h` directly into its source tree will produce a component entry. The tool has no way to distinguish a vendored copy from an installed external dependency purely from the `#include` directive.
 - **Platform-specific SDK headers.** Windows SDK headers (`windows.h`, `winsock2.h`, `d3d11.h`) and macOS frameworks are not in the stdlib allowlist. Scanning a platform-specific codebase will produce false-positive components for these.
 - **Non-evaluated CMake conditionals.** `find_package()` calls inside `if(FEATURE_X)` blocks are always extracted regardless of whether that feature flag would actually be enabled. A project with many optional dependencies will overcount.
+- **Multi-line `find_package()` calls not detected.** The CMake detector matches `find_package()` with a single-line regex. Invocations split across multiple lines — a common style for long argument lists — are silently missed and produce no component entry.
 - **Test-only dependencies.** The walker does not discriminate between production source and test directories. Google Test or Catch2, found only in `test/`, will appear as components alongside production dependencies.
 
 ---
