@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -102,7 +103,7 @@ func (s IncludeScanner) Detect(ctx context.Context, root string) ([]Dependency, 
 	for r := range results {
 		for _, name := range r.names {
 			if dep, ok := merged[name]; ok {
-				if !containsString(dep.Evidence, r.path) {
+				if !slices.Contains(dep.Evidence, r.path) {
 					dep.Evidence = append(dep.Evidence, r.path)
 				}
 			} else {

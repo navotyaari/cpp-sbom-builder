@@ -3,6 +3,7 @@
 package merger
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -75,7 +76,7 @@ func Merge(results [][]detector.Dependency) []detector.Dependency {
 
 			// Merge Sources (deduplicated).
 			for _, src := range dep.Sources {
-				if !containsString(e.dep.Sources, src) {
+				if !slices.Contains(e.dep.Sources, src) {
 					e.dep.Sources = append(e.dep.Sources, src)
 				}
 				// Record the version this source reported.
@@ -86,7 +87,7 @@ func Merge(results [][]detector.Dependency) []detector.Dependency {
 
 			// Merge Evidence (deduplicated).
 			for _, ev := range dep.Evidence {
-				if !containsString(e.dep.Evidence, ev) {
+				if !slices.Contains(e.dep.Evidence, ev) {
 					e.dep.Evidence = append(e.dep.Evidence, ev)
 				}
 			}
@@ -150,14 +151,4 @@ func resolveVersion(sources []string, versionBySource map[string]string) string 
 	}
 
 	return winner
-}
-
-// containsString reports whether slice contains s.
-func containsString(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

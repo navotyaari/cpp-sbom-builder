@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -86,7 +87,7 @@ func parseCMakeFile(path string, deps map[string]*Dependency) error {
 
 		if existing, ok := deps[name]; ok {
 			// Already seen from another file — add evidence path if new.
-			if !containsString(existing.Evidence, path) {
+			if !slices.Contains(existing.Evidence, path) {
 				existing.Evidence = append(existing.Evidence, path)
 			}
 			// Prefer a concrete version over "unknown".
@@ -106,14 +107,4 @@ func parseCMakeFile(path string, deps map[string]*Dependency) error {
 	}
 
 	return scanner.Err()
-}
-
-// containsString reports whether slice contains s.
-func containsString(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
