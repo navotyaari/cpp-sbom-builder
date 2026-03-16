@@ -199,7 +199,7 @@ func TestMerge_AllUnknownVersionsStayUnknown(t *testing.T) {
 	}
 }
 
-// TestMerge_PriorityHierarchyFull exercises all five priority levels in order.
+// TestMerge_PriorityHierarchyFull exercises all four priority levels in order.
 func TestMerge_PriorityHierarchyFull(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -211,8 +211,7 @@ func TestMerge_PriorityHierarchyFull(t *testing.T) {
 	}{
 		{"vcpkg over conan", "vcpkg", "1.0", "conan", "2.0", "1.0"},
 		{"conan over cmake", "conan", "1.0", "cmake", "2.0", "1.0"},
-		{"cmake over pkgconfig", "cmake", "1.0", "pkgconfig", "2.0", "1.0"},
-		{"pkgconfig over include", "pkgconfig", "1.0", "include", "2.0", "1.0"},
+		{"cmake over include", "cmake", "1.0", "include", "2.0", "1.0"},
 	}
 
 	for _, tc := range tests {

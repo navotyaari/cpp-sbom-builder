@@ -24,7 +24,7 @@
 When the same dependency is reported by multiple detectors with conflicting versions, the merger applies this priority order:
 
 ```
-vcpkg (1) > conan (2) > cmake (3) > pkgconfig (4) > include (5)
+vcpkg (1) > conan (2) > cmake (3) > include (4)
 ```
 
 If the highest-priority source reports `"unknown"` but a lower-priority source has a concrete version, the real version is used. This means a project that lists a package in vcpkg.json without a version field but *does* specify a version in CMakeLists.txt will still get a version in the output.
@@ -81,7 +81,7 @@ If a dependency is detected solely by `IncludeScanner` with no manifest confirma
 Several approaches would increase version coverage:
 
 1. **Parse version-define headers.** Many libraries ship a `<name>/version.h` that defines `#define OPENSSL_VERSION_TEXT "1.1.1"`. A follow-up scanner could open the first discovered header file for a dependency and regex-search for `VERSION` defines.
-2. **Parse `pkg-config` `.pc` files.** The `pkgconfig` detector stub is already wired into the merger priority table. Implementing it would cover any library that ships a `.pc` file (most system libraries on Linux).
+2. **Parse `pkg-config` `.pc` files.** Implementing a pkgconfig detector would cover any library that ships a `.pc` file (most system libraries on Linux). This is not yet implemented; the priority slot previously reserved for it in the merger has been removed pending a full implementation.
 3. **Read `vcpkg.lock` / `conan.lock`.** Lock files contain exact resolved versions including transitive dependencies. These are higher-confidence than the manifest files currently parsed.
 4. **CMake `FetchContent` / `ExternalProject_Add`.** These directives often embed version strings as URL parameters or Git tags. Parsing them is non-trivial but would recover versions for projects that don't use a package manager.
 

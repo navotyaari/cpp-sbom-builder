@@ -13,11 +13,10 @@ import (
 // sourcePriority maps detector names to their confidence rank.
 // Lower number = higher confidence.
 var sourcepriority = map[string]int{
-	"vcpkg":     1,
-	"conan":     2,
-	"cmake":     3,
-	"pkgconfig": 4,
-	"include":   5,
+	"vcpkg":   1,
+	"conan":   2,
+	"cmake":   3,
+	"include": 4,
 }
 
 // priorityOf returns the priority for a source name; unknown sources get a
