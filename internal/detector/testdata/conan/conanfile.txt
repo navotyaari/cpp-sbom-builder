@@ -1,0 +1,13 @@
+[requires]
+openssl/1.1.1
+boost/1.74.0@conan/stable
+zlib/1.2.11
+
+# optional test framework — comment should be ignored
+# gtest/1.11.0
+
+[generators]
+cmake
+
+[options]
+boost:shared=True
