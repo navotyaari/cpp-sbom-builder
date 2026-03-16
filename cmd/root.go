@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"cpp-sbom-builder/internal/detector"
 	"cpp-sbom-builder/internal/formatter"
@@ -38,7 +41,10 @@ func Execute() {
 		os.Exit(1)
 	}
 
-	if err := Run(*dir, *output); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := Run(ctx, os.Stderr, *dir, *output); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -46,9 +52,9 @@ func Execute() {
 
 // Run executes the full SBOM pipeline. It is exported so that integration
 // tests can call it directly without going through Execute or touching os.Exit.
-func Run(dir, outputPath string) error {
-	ctx := context.Background()
-
+// Diagnostic warnings are written to w. The pipeline respects ctx cancellation:
+// if ctx is cancelled before all detectors complete, Run returns ctx.Err().
+func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 	// ── Step 1: Run all detectors concurrently ───────────────────────────────
 	detectors := []detector.Detector{
 		detector.CMakeDetector{},
@@ -84,12 +90,21 @@ func Run(dir, outputPath string) error {
 	var allResults [][]detector.Dependency
 	for r := range resultsCh {
 		if r.err != nil {
+			// Propagate context cancellation immediately.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			// Log detector errors but continue — one failing detector should
 			// not abort the whole scan.
-			fmt.Fprintf(os.Stderr, "warning: detector error: %v\n", r.err)
+			fmt.Fprintf(w, "warning: detector error: %v\n", r.err)
 			continue
 		}
 		allResults = append(allResults, r.deps)
+	}
+
+	// Final cancellation check after draining the results channel.
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	// ── Step 2: Merge ─────────────────────────────────────────────────────────

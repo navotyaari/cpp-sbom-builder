@@ -1,7 +1,9 @@
 package main_test
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,7 +30,7 @@ func runPipeline(t *testing.T, dir string) formatter.SBOMReport {
 
 	outFile := filepath.Join(t.TempDir(), "sbom.json")
 
-	if err := cmd.Run(dir, outFile); err != nil {
+	if err := cmd.Run(context.Background(), io.Discard, dir, outFile); err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
@@ -113,7 +115,7 @@ func TestIntegration_JSONOutputIsValid(t *testing.T) {
 	dir := sampleProjectDir(t)
 	outFile := filepath.Join(t.TempDir(), "sbom.json")
 
-	if err := cmd.Run(dir, outFile); err != nil {
+	if err := cmd.Run(context.Background(), io.Discard, dir, outFile); err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
