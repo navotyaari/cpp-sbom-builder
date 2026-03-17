@@ -28,19 +28,6 @@ func priorityOf(source string) int {
 	return 99
 }
 
-// bestSource returns the highest-confidence source name from a slice.
-func bestSource(sources []string) string {
-	best := ""
-	bestP := 100
-	for _, s := range sources {
-		if p := priorityOf(s); p < bestP {
-			bestP = p
-			best = s
-		}
-	}
-	return best
-}
-
 // mergeEntry holds the working state while accumulating a single dependency.
 type mergeEntry struct {
 	dep detector.Dependency
