@@ -138,6 +138,6 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		return fmt.Errorf("writing %q: %w", outputPath, err)
 	}
 
-	fmt.Printf("SBOM written to %s\n", outputPath)
+	fmt.Fprintf(w, "SBOM written to %s\n", outputPath)
 	return nil
 }
