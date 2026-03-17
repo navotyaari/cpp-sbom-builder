@@ -12,7 +12,7 @@ import (
 
 // sourcePriority maps detector names to their confidence rank.
 // Lower number = higher confidence.
-var sourcepriority = map[string]int{
+var sourcePriority = map[string]int{
 	"vcpkg":   1,
 	"conan":   2,
 	"cmake":   3,
@@ -22,7 +22,7 @@ var sourcepriority = map[string]int{
 // priorityOf returns the priority for a source name; unknown sources get a
 // low-priority fallback so they are never preferred over known detectors.
 func priorityOf(source string) int {
-	if p, ok := sourcepriority[source]; ok {
+	if p, ok := sourcePriority[source]; ok {
 		return p
 	}
 	return 99
