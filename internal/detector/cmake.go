@@ -67,6 +67,7 @@ func isCMakeFile(name string) bool {
 func parseCMakeFile(path string, deps map[string]*Dependency) error {
 	f, err := os.Open(path)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmake detector: skipping %s: %v\n", path, err)
 		return nil // unreadable file → skip silently
 	}
 	defer f.Close()
