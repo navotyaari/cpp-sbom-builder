@@ -164,7 +164,7 @@ func scanFileIncludes(path string) []string {
 			continue
 		}
 
-		name := depNameFromHeader(header)
+		name := DepNameFromHeader(header)
 		if name == "" {
 			continue
 		}
@@ -183,12 +183,16 @@ func scanFileIncludes(path string) []string {
 	return names
 }
 
-// depNameFromHeader derives a dependency name from a header path.
+// DepNameFromHeader derives a dependency name from a header path.
 //
-//	"openssl/ssl.h"   → "openssl"   (top-level directory)
-//	"boost/regex.hpp" → "boost"
-//	"mylib.h"         → "mylib"     (flat header, strip extension)
-func depNameFromHeader(header string) string {
+//	"openssl/ssl.h"          → "openssl"   (top-level directory)
+//	"boost/filesystem/path.hpp" → "boost"  (deeply nested — only first component)
+//	"mylib.h"                → "mylib"     (flat header, strip extension)
+//	"mylib"                  → "mylib"     (flat header, no extension)
+//
+// Path separators are normalised to forward-slashes before processing, so
+// Windows-style paths (e.g. "openssl\ssl.h") are handled correctly.
+func DepNameFromHeader(header string) string {
 	// Normalise path separators (Windows tolerance).
 	header = filepath.ToSlash(header)
 
