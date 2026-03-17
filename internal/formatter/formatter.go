@@ -57,10 +57,16 @@ type Occurrence struct {
 // ── Formatter ────────────────────────────────────────────────────────────────
 
 const (
-	toolVendor  = "cpp-sbom-builder"
-	toolName    = "cpp-sbom-builder"
-	toolVersion = "1.0.0"
+	toolVendor = "cpp-sbom-builder"
+	toolName   = "cpp-sbom-builder"
 )
+
+// toolVersion is the version string embedded in the metadata.tools entry of
+// every generated SBOM.  It defaults to "dev" for local builds and is
+// overridden at release time via:
+//
+//	go build -ldflags "-X cpp-sbom-builder/internal/formatter.toolVersion=x.y.z"
+var toolVersion = "dev"
 
 // Format converts a merged dependency slice into a CycloneDX 1.4 SBOMReport.
 // projectName is used as the metadata.component name.

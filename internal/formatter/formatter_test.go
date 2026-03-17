@@ -54,8 +54,26 @@ func TestFormat_MetadataTools(t *testing.T) {
 	if tool.Vendor != "cpp-sbom-builder" {
 		t.Errorf("Tool.Vendor = %q, want %q", tool.Vendor, "cpp-sbom-builder")
 	}
-	if tool.Version != "1.0.0" {
-		t.Errorf("Tool.Version = %q, want %q", tool.Version, "1.0.0")
+	if tool.Version == "" {
+		t.Errorf("Tool.Version is empty; want a non-empty version string")
+	}
+}
+
+// TestFormat_MetadataToolVersion_NonEmpty verifies that the tool version in
+// the SBOM metadata is always non-empty.  The exact value depends on whether
+// the binary was built with -ldflags version injection (release builds) or
+// not (defaults to "dev"); either way it must not be blank.
+func TestFormat_MetadataToolVersion_NonEmpty(t *testing.T) {
+	report, err := formatter.Format(nil, "myproject")
+	if err != nil {
+		t.Fatalf("Format() error: %v", err)
+	}
+
+	if len(report.Metadata.Tools) == 0 {
+		t.Fatal("Metadata.Tools is empty")
+	}
+	if v := report.Metadata.Tools[0].Version; v == "" {
+		t.Error("metadata.tools[0].version is empty; want a non-empty string (\"dev\" in local builds, a semver tag in release builds)")
 	}
 }
 

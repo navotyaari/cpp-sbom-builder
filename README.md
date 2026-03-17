@@ -21,7 +21,17 @@ cd cpp-sbom-builder
 go build -o cpp-sbom-builder .
 ```
 
-This produces a single self-contained binary named `cpp-sbom-builder` (or `cpp-sbom-builder.exe` on Windows).
+This produces a single self-contained binary. The `metadata.tools[0].version` field in every generated SBOM
+will be `"dev"` when built this way.
+
+**To stamp a release version into the binary**, pass the version string via `-ldflags` at build time:
+
+```bash
+go build -ldflags "-X cpp-sbom-builder/internal/formatter.toolVersion=1.2.3" -o cpp-sbom-builder .
+```
+
+Replace `1.2.3` with the actual release tag. The injected value appears verbatim in the
+`metadata.tools[0].version` field of every SBOM the binary produces.
 
 ---
 
@@ -81,7 +91,7 @@ A generated `sbom.json` looks like this (abbreviated):
   "metadata": {
     "timestamp": "2024-11-01T12:00:00Z",
     "tools": [
-      { "vendor": "cpp-sbom-builder", "name": "cpp-sbom-builder", "version": "1.0.0" }
+      { "vendor": "cpp-sbom-builder", "name": "cpp-sbom-builder", "version": "1.2.3" }
     ],
     "component": {
       "type": "application",
