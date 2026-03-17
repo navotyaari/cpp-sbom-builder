@@ -232,3 +232,138 @@ func TestFormat_NoEvidenceOmitsEvidenceField(t *testing.T) {
 		t.Errorf("expected no 'evidence' key for dep with no evidence paths, got: %s", data)
 	}
 }
+
+// ── bom-ref uniqueness tests ──────────────────────────────────────────────────
+
+// TestFormat_BOMRef_UniqueNameVersion verifies that two components sharing the
+// same name but carrying distinct versions each get the plain name-version
+// bom-ref with no suffix (the happy-path: no collision).
+func TestFormat_BOMRef_UniqueNameVersion(t *testing.T) {
+	deps := []detector.Dependency{
+		sampleDep("zlib", "1.2.11", "pkg:generic/zlib@1.2.11", "/vcpkg.json"),
+		sampleDep("zlib", "1.3.0", "pkg:generic/zlib@1.3.0", "/other/vcpkg.json"),
+	}
+
+	report, err := formatter.Format(deps, "myproject")
+	if err != nil {
+		t.Fatalf("Format() error: %v", err)
+	}
+
+	wantRefs := []string{"zlib-1.2.11", "zlib-1.3.0"}
+	for i, want := range wantRefs {
+		got := report.Components[i].BOMRef
+		if got != want {
+			t.Errorf("Components[%d].BOMRef = %q, want %q", i, got, want)
+		}
+	}
+}
+
+// TestFormat_BOMRef_DuplicateNameVersionUnknown verifies that two components
+// with the same name and version "unknown" receive distinct bom-refs.
+// The first keeps the plain form; the second gets a "-2" suffix.
+func TestFormat_BOMRef_DuplicateNameVersionUnknown(t *testing.T) {
+	deps := []detector.Dependency{
+		sampleDep("mylib", "unknown", "", "/include/mylib.h"),
+		sampleDep("mylib", "unknown", "", "/src/mylib.h"),
+	}
+
+	report, err := formatter.Format(deps, "myproject")
+	if err != nil {
+		t.Fatalf("Format() error: %v", err)
+	}
+
+	if len(report.Components) != 2 {
+		t.Fatalf("Components len = %d, want 2", len(report.Components))
+	}
+
+	ref0 := report.Components[0].BOMRef
+	ref1 := report.Components[1].BOMRef
+
+	if ref0 != "mylib-unknown" {
+		t.Errorf("Components[0].BOMRef = %q, want %q", ref0, "mylib-unknown")
+	}
+	if ref1 != "mylib-unknown-2" {
+		t.Errorf("Components[1].BOMRef = %q, want %q", ref1, "mylib-unknown-2")
+	}
+
+	// Uniqueness is the hard requirement.
+	if ref0 == ref1 {
+		t.Errorf("bom-ref values are not unique: both = %q", ref0)
+	}
+}
+
+// TestFormat_BOMRef_MixedUniquenessAndDuplicates verifies correct behaviour
+// when some name-version pairs are unique and others collide.
+// Expected assignments (in input order):
+//
+//	openssl-1.1.1      → "openssl-1.1.1"      (unique, no suffix)
+//	curl-unknown [1]   → "curl-unknown"        (first occurrence, no suffix)
+//	curl-unknown [2]   → "curl-unknown-2"      (collision → suffix)
+//	boost-1.74.0       → "boost-1.74.0"        (unique, no suffix)
+//	curl-unknown [3]   → "curl-unknown-3"      (third occurrence → suffix)
+func TestFormat_BOMRef_MixedUniquenessAndDuplicates(t *testing.T) {
+	deps := []detector.Dependency{
+		sampleDep("openssl", "1.1.1", "pkg:generic/openssl@1.1.1", "/vcpkg.json"),
+		sampleDep("curl", "unknown", "", "/include/curl.h"),
+		sampleDep("curl", "unknown", "", "/src/curl.h"),
+		sampleDep("boost", "1.74.0", "pkg:generic/boost@1.74.0", "/CMakeLists.txt"),
+		sampleDep("curl", "unknown", "", "/lib/curl.h"),
+	}
+
+	report, err := formatter.Format(deps, "myproject")
+	if err != nil {
+		t.Fatalf("Format() error: %v", err)
+	}
+
+	want := []string{
+		"openssl-1.1.1",
+		"curl-unknown",
+		"curl-unknown-2",
+		"boost-1.74.0",
+		"curl-unknown-3",
+	}
+
+	if len(report.Components) != len(want) {
+		t.Fatalf("Components len = %d, want %d", len(report.Components), len(want))
+	}
+
+	for i, w := range want {
+		got := report.Components[i].BOMRef
+		if got != w {
+			t.Errorf("Components[%d].BOMRef = %q, want %q", i, got, w)
+		}
+	}
+
+	// Global uniqueness check across all bom-refs including the root component.
+	allRefs := make(map[string]int)
+	allRefs[report.Metadata.Component.BOMRef]++
+	for _, c := range report.Components {
+		allRefs[c.BOMRef]++
+	}
+	for ref, count := range allRefs {
+		if count > 1 {
+			t.Errorf("bom-ref %q appears %d times; must be unique", ref, count)
+		}
+	}
+}
+
+// TestFormat_BOMRef_RootComponentIncludedInUniquenessCheck verifies that when
+// a dependency would naturally produce the same bom-ref as the root metadata
+// component, it receives a suffix instead.
+func TestFormat_BOMRef_RootComponentIncludedInUniquenessCheck(t *testing.T) {
+	// The root component gets bom-ref "myproject-unknown".
+	// A dependency named "myproject" with version "unknown" would collide.
+	dep := sampleDep("myproject", "unknown", "", "/include/myproject.h")
+
+	report, err := formatter.Format([]detector.Dependency{dep}, "myproject")
+	if err != nil {
+		t.Fatalf("Format() error: %v", err)
+	}
+
+	rootRef := report.Metadata.Component.BOMRef
+	depRef := report.Components[0].BOMRef
+
+	if rootRef == depRef {
+		t.Errorf("root bom-ref %q collides with component bom-ref %q", rootRef, depRef)
+	}
+}
