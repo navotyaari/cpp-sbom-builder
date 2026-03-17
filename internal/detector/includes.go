@@ -3,6 +3,8 @@ package detector
 import (
 	"bufio"
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,7 +32,12 @@ var cppExtensions = map[string]bool{
 
 // IncludeScanner detects third-party dependencies by scanning #include
 // directives in C++ source and header files.
-type IncludeScanner struct{}
+//
+// W is the writer used for per-file warning messages (unreadable files).
+// If W is nil, warnings are written to os.Stderr.
+type IncludeScanner struct {
+	W io.Writer
+}
 
 // Name implements Detector.
 func (s IncludeScanner) Name() string { return "include" }
@@ -54,11 +61,11 @@ func (s IncludeScanner) Detect(ctx context.Context, files []string) ([]Dependenc
 		}
 	}
 
-	return s.scanFiles(ctx, candidates), nil
+	return s.scanFiles(ctx, candidates, warnWriter(s.W)), nil
 }
 
 // scanFiles fans the given file list across a worker pool and merges results.
-func (s IncludeScanner) scanFiles(ctx context.Context, files []string) []Dependency {
+func (s IncludeScanner) scanFiles(ctx context.Context, files []string, w io.Writer) []Dependency {
 	if len(files) == 0 {
 		return nil
 	}
@@ -85,7 +92,7 @@ func (s IncludeScanner) scanFiles(ctx context.Context, files []string) []Depende
 					return
 				default:
 				}
-				names := scanFileIncludes(path)
+				names := scanFileIncludes(path, w)
 				if len(names) > 0 {
 					results <- fileResult{path: path, names: names}
 				}
@@ -128,9 +135,11 @@ func (s IncludeScanner) scanFiles(ctx context.Context, files []string) []Depende
 
 // scanFileIncludes opens a single source file, extracts #include headers,
 // filters stdlib/internal paths, and returns deduplicated third-party dep names.
-func scanFileIncludes(path string) []string {
+// If the file cannot be opened, a warning is written to w and nil is returned.
+func scanFileIncludes(path string, w io.Writer) []string {
 	f, err := os.Open(path)
 	if err != nil {
+		fmt.Fprintf(w, "include scanner: skipping %s: %v\n", path, err)
 		return nil
 	}
 	defer f.Close()

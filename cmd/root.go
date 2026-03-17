@@ -83,7 +83,7 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		detector.CMakeDetector{W: w},
 		detector.VcpkgDetector{W: w},
 		detector.ConanDetector{W: w},
-		detector.IncludeScanner{},
+		detector.IncludeScanner{W: w},
 	}
 
 	type detResult struct {
