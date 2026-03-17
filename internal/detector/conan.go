@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -16,49 +16,32 @@ type ConanDetector struct{}
 func (c ConanDetector) Name() string { return "conan" }
 
 // Detect implements Detector.
-// It walks root for files named exactly "conanfile.txt", parses the [requires]
-// section of each, and returns one Dependency per entry.
-func (c ConanDetector) Detect(ctx context.Context, root string) ([]Dependency, error) {
+// It filters files for paths named exactly "conanfile.txt", parses the
+// [requires] section of each, and returns one Dependency per entry.
+func (c ConanDetector) Detect(ctx context.Context, files []string) ([]Dependency, error) {
 	var deps []Dependency
 
-	err := walkDir(ctx, root, conanCallback(&deps))
-	if err != nil {
-		return nil, err
-	}
+	for _, path := range files {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 
-	return deps, nil
-}
-
-// DetectFiles implements FilesDetector.
-// It applies the same logic as Detect but operates on a pre-built file list
-// rather than walking the filesystem independently.
-func (c ConanDetector) DetectFiles(ctx context.Context, files []string) ([]Dependency, error) {
-	var deps []Dependency
-
-	err := walkFiles(ctx, files, conanCallback(&deps))
-	if err != nil {
-		return nil, err
-	}
-
-	return deps, nil
-}
-
-// conanCallback returns the walkFn shared by both Detect and DetectFiles.
-func conanCallback(deps *[]Dependency) walkFn {
-	return func(path string, d fs.DirEntry) error {
-		if d.IsDir() || d.Name() != "conanfile.txt" {
-			return nil
+		if filepath.Base(path) != "conanfile.txt" {
+			continue
 		}
 
 		found, parseErr := parseConanFile(path)
 		if parseErr != nil {
 			fmt.Fprintf(os.Stderr, "conan detector: skipping %s: %v\n", path, parseErr)
-			return nil
+			continue
 		}
 
-		*deps = append(*deps, found...)
-		return nil
+		deps = append(deps, found...)
 	}
+
+	return deps, nil
 }
 
 // parseConanFile reads a conanfile.txt and extracts dependencies from the

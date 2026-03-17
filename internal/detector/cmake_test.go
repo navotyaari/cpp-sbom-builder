@@ -3,6 +3,7 @@ package detector_test
 import (
 	"context"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,7 +13,7 @@ import (
 	"cpp-sbom-builder/internal/detector"
 )
 
-// fixtureDir returns the absolute path to testdata/cmake so tests are not
+// fixtureDir returns the absolute path to testdata/<sub> so tests are not
 // tied to the working directory from which `go test` is invoked.
 func fixtureDir(t *testing.T, sub string) string {
 	t.Helper()
@@ -21,6 +22,27 @@ func fixtureDir(t *testing.T, sub string) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(file), "testdata", sub)
+}
+
+// listFiles walks root with filepath.WalkDir and returns a flat slice of all
+// file paths found.  It is the test-side equivalent of walker.Walk, used to
+// build the file list that Detect now expects as its second argument.
+func listFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("listFiles(%q): %v", root, err)
+	}
+	return paths
 }
 
 func TestCMakeDetector_Name(t *testing.T) {
@@ -35,7 +57,7 @@ func TestCMakeDetector_Detect(t *testing.T) {
 	fixturePath := filepath.Join(root, "CMakeLists.txt")
 
 	d := detector.CMakeDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), listFiles(t, root))
 	if err != nil {
 		t.Fatalf("Detect() error: %v", err)
 	}
@@ -83,11 +105,17 @@ func TestCMakeDetector_Detect(t *testing.T) {
 	}
 }
 
-func TestCMakeDetector_Detect_NonExistentRoot(t *testing.T) {
+// TestCMakeDetector_Detect_EmptyFilesReturnsEmpty verifies that an empty file
+// list produces zero deps and no error.  The non-existent-root error contract
+// now belongs to the walker (cmd/root.go), not the detector.
+func TestCMakeDetector_Detect_EmptyFilesReturnsEmpty(t *testing.T) {
 	d := detector.CMakeDetector{}
-	_, err := d.Detect(context.Background(), "/no/such/directory")
-	if err == nil {
-		t.Fatal("expected error for non-existent root, got nil")
+	deps, err := d.Detect(context.Background(), []string{})
+	if err != nil {
+		t.Fatalf("Detect() error on empty list: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected 0 deps for empty file list, got %d", len(deps))
 	}
 }
 
@@ -97,15 +125,16 @@ func TestCMakeDetector_Detect_ContextCancelled(t *testing.T) {
 	cancel() // cancel immediately
 
 	d := detector.CMakeDetector{}
-	_, err := d.Detect(ctx, root)
+	// Pass a non-empty file list so the cancellation check inside the loop fires.
+	_, err := d.Detect(ctx, listFiles(t, root))
 	// Either context.Canceled is returned or no results — both are acceptable.
 	// The important guarantee is that it does not panic.
 	_ = err
 }
 
-// TestParseCMakeFile_UnreadableFileLogsWarning verifies that when parseCMakeFile
-// cannot open a file it writes a warning to os.Stderr and Detect still returns
-// nil (the walk continues).
+// TestParseCMakeFile_UnreadableFileLogsWarning verifies that when the detector
+// cannot open a file it writes a warning to os.Stderr and returns nil (the
+// iteration continues).
 func TestParseCMakeFile_UnreadableFileLogsWarning(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 0o000 does not reliably prevent reads on Windows")
@@ -128,7 +157,8 @@ func TestParseCMakeFile_UnreadableFileLogsWarning(t *testing.T) {
 	os.Stderr = w
 
 	d := detector.CMakeDetector{}
-	_, detectErr := d.Detect(context.Background(), root)
+	// Pass the unreadable path directly — no walk needed.
+	_, detectErr := d.Detect(context.Background(), []string{unreadable})
 
 	// Restore os.Stderr before reading the pipe to avoid a deadlock.
 	w.Close()

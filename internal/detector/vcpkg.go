@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -29,51 +29,34 @@ type vcpkgDepObject struct {
 }
 
 // Detect implements Detector.
-// It walks root for files named exactly "vcpkg.json", parses each as JSON, and
-// returns one Dependency per entry in the "dependencies" array.
+// It filters files for paths named exactly "vcpkg.json", parses each as JSON,
+// and returns one Dependency per entry in the "dependencies" array.
 // Malformed JSON files are skipped with a warning written to stderr; they do
 // not cause an error to be returned.
-func (v VcpkgDetector) Detect(ctx context.Context, root string) ([]Dependency, error) {
+func (v VcpkgDetector) Detect(ctx context.Context, files []string) ([]Dependency, error) {
 	var deps []Dependency
 
-	err := walkDir(ctx, root, vcpkgCallback(&deps))
-	if err != nil {
-		return nil, err
-	}
+	for _, path := range files {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 
-	return deps, nil
-}
-
-// DetectFiles implements FilesDetector.
-// It applies the same logic as Detect but operates on a pre-built file list
-// rather than walking the filesystem independently.
-func (v VcpkgDetector) DetectFiles(ctx context.Context, files []string) ([]Dependency, error) {
-	var deps []Dependency
-
-	err := walkFiles(ctx, files, vcpkgCallback(&deps))
-	if err != nil {
-		return nil, err
-	}
-
-	return deps, nil
-}
-
-// vcpkgCallback returns the walkFn shared by both Detect and DetectFiles.
-func vcpkgCallback(deps *[]Dependency) walkFn {
-	return func(path string, d fs.DirEntry) error {
-		if d.IsDir() || d.Name() != "vcpkg.json" {
-			return nil
+		if filepath.Base(path) != "vcpkg.json" {
+			continue
 		}
 
 		found, parseErr := parseVcpkgFile(path)
 		if parseErr != nil {
 			fmt.Fprintf(os.Stderr, "vcpkg detector: skipping %s: %v\n", path, parseErr)
-			return nil // skip malformed files silently
+			continue // skip malformed files silently
 		}
 
-		*deps = append(*deps, found...)
-		return nil
+		deps = append(deps, found...)
 	}
+
+	return deps, nil
 }
 
 // parseVcpkgFile decodes a single vcpkg.json and returns its dependencies.

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,55 +28,32 @@ type CMakeDetector struct{}
 func (c CMakeDetector) Name() string { return "cmake" }
 
 // Detect implements Detector.
-// It walks root for CMakeLists.txt / *.cmake files, extracts find_package()
-// calls, and returns one Dependency per unique normalised package name.
-func (c CMakeDetector) Detect(ctx context.Context, root string) ([]Dependency, error) {
+// It filters files for CMakeLists.txt / *.cmake paths, extracts find_package()
+// calls from each, and returns one Dependency per unique normalised package name.
+func (c CMakeDetector) Detect(ctx context.Context, files []string) ([]Dependency, error) {
 	deps := map[string]*Dependency{}
 
-	err := walkDir(ctx, root, cmakeCallback(deps))
-	if err != nil {
-		return nil, err
-	}
-
-	return cmakeDepsToSlice(deps), nil
-}
-
-// DetectFiles implements FilesDetector.
-// It applies the same logic as Detect but operates on a pre-built file list
-// rather than walking the filesystem independently.
-func (c CMakeDetector) DetectFiles(ctx context.Context, files []string) ([]Dependency, error) {
-	deps := map[string]*Dependency{}
-
-	err := walkFiles(ctx, files, cmakeCallback(deps))
-	if err != nil {
-		return nil, err
-	}
-
-	return cmakeDepsToSlice(deps), nil
-}
-
-// cmakeCallback returns the walkFn shared by both Detect and DetectFiles.
-func cmakeCallback(deps map[string]*Dependency) walkFn {
-	return func(path string, d fs.DirEntry) error {
-		if d.IsDir() {
-			return nil
+	for _, path := range files {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
 		}
 
-		if !isCMakeFile(d.Name()) {
-			return nil
+		if !isCMakeFile(filepath.Base(path)) {
+			continue
 		}
 
-		return parseCMakeFile(path, deps)
+		if err := parseCMakeFile(path, deps); err != nil {
+			return nil, err
+		}
 	}
-}
 
-// cmakeDepsToSlice converts the accumulator map to a flat slice.
-func cmakeDepsToSlice(deps map[string]*Dependency) []Dependency {
 	result := make([]Dependency, 0, len(deps))
 	for _, dep := range deps {
 		result = append(result, *dep)
 	}
-	return result
+	return result, nil
 }
 
 // isCMakeFile reports whether name is a CMake source file.

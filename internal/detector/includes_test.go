@@ -20,7 +20,7 @@ func TestIncludeScanner_Detect_Fixture(t *testing.T) {
 	root := fixtureDir(t, "includes")
 
 	s := detector.IncludeScanner{}
-	deps, err := s.Detect(context.Background(), root)
+	deps, err := s.Detect(context.Background(), listFiles(t, root))
 	if err != nil {
 		t.Fatalf("Detect() unexpected error: %v", err)
 	}
@@ -65,12 +65,11 @@ func TestIncludeScanner_Detect_Fixture(t *testing.T) {
 
 // TestIncludeScanner_Detect_StdlibFiltered confirms stdlib headers are dropped.
 func TestIncludeScanner_Detect_StdlibFiltered(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "main.cpp"),
-		"#include <vector>\n#include <string>\n#include <iostream>\n")
+	f := filepath.Join(t.TempDir(), "main.cpp")
+	writeFile(t, f, "#include <vector>\n#include <string>\n#include <iostream>\n")
 
 	s := detector.IncludeScanner{}
-	deps, err := s.Detect(context.Background(), root)
+	deps, err := s.Detect(context.Background(), []string{f})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,12 +81,11 @@ func TestIncludeScanner_Detect_StdlibFiltered(t *testing.T) {
 // TestIncludeScanner_Detect_RelativePathsFiltered confirms ./ and ../ headers
 // are not returned as dependencies.
 func TestIncludeScanner_Detect_RelativePathsFiltered(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "main.cpp"),
-		"#include \"./local.h\"\n#include \"../parent.h\"\n")
+	f := filepath.Join(t.TempDir(), "main.cpp")
+	writeFile(t, f, "#include \"./local.h\"\n#include \"../parent.h\"\n")
 
 	s := detector.IncludeScanner{}
-	deps, err := s.Detect(context.Background(), root)
+	deps, err := s.Detect(context.Background(), []string{f})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -99,12 +97,11 @@ func TestIncludeScanner_Detect_RelativePathsFiltered(t *testing.T) {
 // TestIncludeScanner_Detect_TopLevelDirExtracted confirms the top-level
 // directory component is used as the dep name for path-style headers.
 func TestIncludeScanner_Detect_TopLevelDirExtracted(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "app.cpp"),
-		"#include <nlohmann/json.hpp>\n#include <spdlog/spdlog.h>\n")
+	f := filepath.Join(t.TempDir(), "app.cpp")
+	writeFile(t, f, "#include <nlohmann/json.hpp>\n#include <spdlog/spdlog.h>\n")
 
 	s := detector.IncludeScanner{}
-	deps, err := s.Detect(context.Background(), root)
+	deps, err := s.Detect(context.Background(), []string{f})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,12 +122,14 @@ func TestIncludeScanner_Detect_TopLevelDirExtracted(t *testing.T) {
 // dep appears in multiple files it is merged into one entry with both paths
 // in Evidence.
 func TestIncludeScanner_Detect_EvidenceAcrossFiles(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "a.cpp"), "#include <openssl/ssl.h>\n")
-	writeFile(t, filepath.Join(root, "b.cpp"), "#include <openssl/ssl.h>\n")
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.cpp")
+	b := filepath.Join(dir, "b.cpp")
+	writeFile(t, a, "#include <openssl/ssl.h>\n")
+	writeFile(t, b, "#include <openssl/ssl.h>\n")
 
 	s := detector.IncludeScanner{}
-	deps, err := s.Detect(context.Background(), root)
+	deps, err := s.Detect(context.Background(), []string{a, b})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,14 +152,14 @@ func TestIncludeScanner_Detect_EvidenceAcrossFiles(t *testing.T) {
 // TestIncludeScanner_Detect_OnlyCppExtensions confirms that non-C++ files are
 // not processed.
 func TestIncludeScanner_Detect_OnlyCppExtensions(t *testing.T) {
-	root := t.TempDir()
-	// .go file with a fake #include — must be ignored.
-	writeFile(t, filepath.Join(root, "main.go"), "#include <openssl/ssl.h>\n")
-	// Python file — also ignored.
-	writeFile(t, filepath.Join(root, "helper.py"), "#include <boost/regex.hpp>\n")
+	dir := t.TempDir()
+	goFile := filepath.Join(dir, "main.go")
+	pyFile := filepath.Join(dir, "helper.py")
+	writeFile(t, goFile, "#include <openssl/ssl.h>\n")
+	writeFile(t, pyFile, "#include <boost/regex.hpp>\n")
 
 	s := detector.IncludeScanner{}
-	deps, err := s.Detect(context.Background(), root)
+	deps, err := s.Detect(context.Background(), []string{goFile, pyFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -169,25 +168,31 @@ func TestIncludeScanner_Detect_OnlyCppExtensions(t *testing.T) {
 	}
 }
 
-// TestIncludeScanner_Detect_NonExistentRoot checks the error contract.
-func TestIncludeScanner_Detect_NonExistentRoot(t *testing.T) {
+// TestIncludeScanner_Detect_EmptyFilesReturnsEmpty verifies that an empty file
+// list produces zero deps and no error.  The non-existent-root error contract
+// now belongs to the walker (cmd/root.go), not the detector.
+func TestIncludeScanner_Detect_EmptyFilesReturnsEmpty(t *testing.T) {
 	s := detector.IncludeScanner{}
-	_, err := s.Detect(context.Background(), "/no/such/path/includes")
-	if err == nil {
-		t.Fatal("expected error for non-existent root, got nil")
+	deps, err := s.Detect(context.Background(), []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected 0 deps, got %d", len(deps))
 	}
 }
 
-// TestIncludeScanner_Detect_EmptyDir returns no deps and no error.
+// TestIncludeScanner_Detect_EmptyDir returns no deps and no error when the
+// file list contains only non-C++ files.
 func TestIncludeScanner_Detect_EmptyDir(t *testing.T) {
 	root := t.TempDir()
 	// Add a sub-dir with no C++ files.
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-
+	// Walk yields the docs dir's contents (none) — simulate with empty list.
 	s := detector.IncludeScanner{}
-	deps, err := s.Detect(context.Background(), root)
+	deps, err := s.Detect(context.Background(), []string{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

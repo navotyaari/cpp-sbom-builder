@@ -3,7 +3,6 @@ package detector
 import (
 	"bufio"
 	"context"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,32 +42,14 @@ type fileResult struct {
 }
 
 // Detect implements Detector.
-// It fans out file scanning across a worker pool of GOMAXPROCS goroutines,
-// then merges results into one Dependency per unique name.
-func (s IncludeScanner) Detect(ctx context.Context, root string) ([]Dependency, error) {
-	// Collect all candidate file paths first so we know total work upfront.
-	var files []string
-	err := walkDir(ctx, root, func(path string, d fs.DirEntry) error {
-		if !d.IsDir() && cppExtensions[strings.ToLower(filepath.Ext(d.Name()))] {
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return s.scanFiles(ctx, files), nil
-}
-
-// DetectFiles implements FilesDetector.
-// It applies the same logic as Detect but operates on a pre-built file list
-// rather than walking the filesystem independently.
-func (s IncludeScanner) DetectFiles(ctx context.Context, files []string) ([]Dependency, error) {
+// It filters files for C++ source and header extensions, then fans out
+// scanning across a worker pool of GOMAXPROCS goroutines, merging results
+// into one Dependency per unique name.
+func (s IncludeScanner) Detect(ctx context.Context, files []string) ([]Dependency, error) {
 	// Filter to C++ source and header files only.
 	var candidates []string
 	for _, path := range files {
-		if cppExtensions[strings.ToLower(filepath.Ext(filepath.Base(path)))] {
+		if cppExtensions[strings.ToLower(filepath.Ext(path))] {
 			candidates = append(candidates, path)
 		}
 	}
@@ -77,7 +58,6 @@ func (s IncludeScanner) DetectFiles(ctx context.Context, files []string) ([]Depe
 }
 
 // scanFiles fans the given file list across a worker pool and merges results.
-// It is the shared implementation used by both Detect and DetectFiles.
 func (s IncludeScanner) scanFiles(ctx context.Context, files []string) []Dependency {
 	if len(files) == 0 {
 		return nil

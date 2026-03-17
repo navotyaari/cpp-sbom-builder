@@ -21,7 +21,7 @@ func TestVcpkgDetector_Detect_Fixture(t *testing.T) {
 	fixturePath := filepath.Join(root, "vcpkg.json")
 
 	d := detector.VcpkgDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), listFiles(t, root))
 	if err != nil {
 		t.Fatalf("Detect() unexpected error: %v", err)
 	}
@@ -35,9 +35,9 @@ func TestVcpkgDetector_Detect_Fixture(t *testing.T) {
 		name    string
 		version string
 	}{
-		{"zlib", "unknown"},    // plain string entry
-		{"openssl", "1.1.1"},   // object with version
-		{"fmt", "unknown"},     // object without version
+		{"zlib", "unknown"},   // plain string entry
+		{"openssl", "1.1.1"},  // object with version
+		{"fmt", "unknown"},    // object without version
 	}
 
 	for _, tc := range tests {
@@ -65,16 +65,13 @@ func TestVcpkgDetector_Detect_Fixture(t *testing.T) {
 }
 
 func TestVcpkgDetector_Detect_MalformedJSON(t *testing.T) {
-	root := t.TempDir()
-
-	// Write a file named vcpkg.json with invalid JSON content.
-	bad := filepath.Join(root, "vcpkg.json")
+	bad := filepath.Join(t.TempDir(), "vcpkg.json")
 	if err := os.WriteFile(bad, []byte(`{ this is not valid json `), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
 	d := detector.VcpkgDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), []string{bad})
 
 	if err != nil {
 		t.Errorf("Detect() returned error for malformed JSON, want nil; got: %v", err)
@@ -85,17 +82,13 @@ func TestVcpkgDetector_Detect_MalformedJSON(t *testing.T) {
 }
 
 func TestVcpkgDetector_Detect_IgnoresNonVcpkgFiles(t *testing.T) {
-	root := t.TempDir()
-
-	// A file that looks similar but is not named exactly "vcpkg.json".
-	impostor := filepath.Join(root, "vcpkg.configuration.json")
-	content := `{"dependencies": ["openssl"]}`
-	if err := os.WriteFile(impostor, []byte(content), 0o644); err != nil {
+	impostor := filepath.Join(t.TempDir(), "vcpkg.configuration.json")
+	if err := os.WriteFile(impostor, []byte(`{"dependencies": ["openssl"]}`), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
 	d := detector.VcpkgDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), []string{impostor})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,10 +97,16 @@ func TestVcpkgDetector_Detect_IgnoresNonVcpkgFiles(t *testing.T) {
 	}
 }
 
-func TestVcpkgDetector_Detect_NonExistentRoot(t *testing.T) {
+// TestVcpkgDetector_Detect_EmptyFilesReturnsEmpty verifies that an empty file
+// list produces zero deps and no error.  The non-existent-root error contract
+// now belongs to the walker (cmd/root.go), not the detector.
+func TestVcpkgDetector_Detect_EmptyFilesReturnsEmpty(t *testing.T) {
 	d := detector.VcpkgDetector{}
-	_, err := d.Detect(context.Background(), "/no/such/path/vcpkg")
-	if err == nil {
-		t.Fatal("expected error for non-existent root, got nil")
+	deps, err := d.Detect(context.Background(), []string{})
+	if err != nil {
+		t.Fatalf("Detect() error on empty list: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected 0 deps for empty file list, got %d", len(deps))
 	}
 }

@@ -69,8 +69,8 @@ func validateDir(dir string) error {
 func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 	// ── Step 1: Single shared filesystem walk ────────────────────────────────
 	// Walk the project tree once with skip-dir pruning and distribute the
-	// resulting file list to every detector.  This replaces four independent
-	// WalkDir calls (one per detector) with a single pass.
+	// resulting file list to every detector.  This replaces the former design
+	// where each detector walked the filesystem independently.
 	files, err := walker.Walk(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("walking %q: %w", dir, err)
@@ -97,15 +97,7 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			var deps []detector.Dependency
-			var err error
-			// Use the pre-walked file list when the detector supports it;
-			// fall back to an independent walk for detectors that do not.
-			if fd, ok := d.(detector.FilesDetector); ok {
-				deps, err = fd.DetectFiles(ctx, files)
-			} else {
-				deps, err = d.Detect(ctx, dir)
-			}
+			deps, err := d.Detect(ctx, files)
 			resultsCh <- detResult{deps: deps, err: err}
 		}()
 	}

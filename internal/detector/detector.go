@@ -30,27 +30,19 @@ type Dependency struct {
 }
 
 // Detector is the interface that every dependency detector must satisfy.
+//
+// Detect receives a pre-built, skip-dir-pruned flat file list produced by the
+// shared walker in cmd/root.go.  Each detector filters that list for the paths
+// it cares about and reads those files directly; it never walks the filesystem
+// itself.  Detect must honour context cancellation and must not modify any files.
 type Detector interface {
 	// Name returns a short, stable identifier for the detector (e.g. "cmake").
 	Name() string
 
-	// Detect scans the project rooted at root and returns all dependencies it
-	// can identify. It should honour context cancellation. It must not modify
-	// any files; it is read-only with respect to the filesystem.
-	Detect(ctx context.Context, root string) ([]Dependency, error)
-}
-
-// FilesDetector is an optional extension of Detector for detectors that can
-// operate on a pre-built flat file list instead of walking the filesystem
-// themselves.  When a detector satisfies this interface, the pipeline can
-// perform a single shared walk and distribute the result, avoiding redundant
-// directory traversal.
-//
-// DetectFiles must produce the same results as Detect would for the same set
-// of files; it must honour context cancellation; it must not modify any files.
-type FilesDetector interface {
-	Detector
-	DetectFiles(ctx context.Context, files []string) ([]Dependency, error)
+	// Detect scans the provided file list and returns all dependencies it can
+	// identify.  files contains absolute paths; the caller guarantees that
+	// skip-listed directories have already been pruned.
+	Detect(ctx context.Context, files []string) ([]Dependency, error)
 }
 
 // BuildPURL constructs a Package URL in the format pkg:generic/<n>@<version>.

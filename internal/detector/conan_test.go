@@ -21,7 +21,7 @@ func TestConanDetector_Detect_Fixture(t *testing.T) {
 	fixturePath := filepath.Join(root, "conanfile.txt")
 
 	d := detector.ConanDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), listFiles(t, root))
 	if err != nil {
 		t.Fatalf("Detect() unexpected error: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestConanDetector_Detect_Fixture(t *testing.T) {
 		version string
 	}{
 		{"openssl", "1.1.1"},
-		{"boost", "1.74.0"},  // @conan/stable suffix must be stripped
+		{"boost", "1.74.0"}, // @conan/stable suffix must be stripped
 		{"zlib", "1.2.11"},
 	}
 
@@ -67,11 +67,11 @@ func TestConanDetector_Detect_Fixture(t *testing.T) {
 // TestConanDetector_Detect_ChannelStripped re-asserts the @user/channel strip
 // explicitly, since it is a named requirement in the spec.
 func TestConanDetector_Detect_ChannelStripped(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "conanfile.txt"), "[requires]\nboost/1.74.0@conan/stable\n")
+	f := filepath.Join(t.TempDir(), "conanfile.txt")
+	writeFile(t, f, "[requires]\nboost/1.74.0@conan/stable\n")
 
 	d := detector.ConanDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), []string{f})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestConanDetector_Detect_ChannelStripped(t *testing.T) {
 // TestConanDetector_Detect_LinesOutsideRequiresIgnored ensures that entries
 // under other sections (e.g. [options]) are not treated as dependencies.
 func TestConanDetector_Detect_LinesOutsideRequiresIgnored(t *testing.T) {
-	root := t.TempDir()
+	f := filepath.Join(t.TempDir(), "conanfile.txt")
 	content := `[generators]
 cmake
 
@@ -97,10 +97,10 @@ openssl/1.1.1
 [requires]
 zlib/1.2.11
 `
-	writeFile(t, filepath.Join(root, "conanfile.txt"), content)
+	writeFile(t, f, content)
 
 	d := detector.ConanDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), []string{f})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,7 +116,7 @@ zlib/1.2.11
 // TestConanDetector_Detect_CommentsAndBlanksSkipped confirms that comment lines
 // and blank lines inside [requires] do not produce dependencies.
 func TestConanDetector_Detect_CommentsAndBlanksSkipped(t *testing.T) {
-	root := t.TempDir()
+	f := filepath.Join(t.TempDir(), "conanfile.txt")
 	content := `[requires]
 # this is a comment
 openssl/1.1.1
@@ -124,10 +124,10 @@ openssl/1.1.1
 # another comment
 zlib/1.2.11
 `
-	writeFile(t, filepath.Join(root, "conanfile.txt"), content)
+	writeFile(t, f, content)
 
 	d := detector.ConanDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), []string{f})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -136,23 +136,28 @@ zlib/1.2.11
 	}
 }
 
-// TestConanDetector_Detect_NonExistentRoot verifies the error contract.
-func TestConanDetector_Detect_NonExistentRoot(t *testing.T) {
+// TestConanDetector_Detect_EmptyFilesReturnsEmpty verifies that an empty file
+// list produces zero deps and no error.  The non-existent-root error contract
+// now belongs to the walker (cmd/root.go), not the detector.
+func TestConanDetector_Detect_EmptyFilesReturnsEmpty(t *testing.T) {
 	d := detector.ConanDetector{}
-	_, err := d.Detect(context.Background(), "/no/such/path/conan")
-	if err == nil {
-		t.Fatal("expected error for non-existent root, got nil")
+	deps, err := d.Detect(context.Background(), []string{})
+	if err != nil {
+		t.Fatalf("Detect() error on empty list: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected 0 deps for empty file list, got %d", len(deps))
 	}
 }
 
 // TestConanDetector_Detect_IgnoresNonConanFiles ensures files with similar
 // names are not processed.
 func TestConanDetector_Detect_IgnoresNonConanFiles(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "conanfile.py"), "[requires]\nopenssl/1.1.1\n")
+	f := filepath.Join(t.TempDir(), "conanfile.py")
+	writeFile(t, f, "[requires]\nopenssl/1.1.1\n")
 
 	d := detector.ConanDetector{}
-	deps, err := d.Detect(context.Background(), root)
+	deps, err := d.Detect(context.Background(), []string{f})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
