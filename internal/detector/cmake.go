@@ -21,6 +21,21 @@ var findPackageRe = regexp.MustCompile(
 	`(?i)find_package\s*\(\s*(\w+)(?:\s+(\d[\d.]*))?`,
 )
 
+// cmakePseudoPackages is the set of lowercase names that CMake resolves
+// internally and that do not represent third-party libraries. Entries in this
+// set are silently skipped by parseCMakeFile so they never appear as SBOM
+// components. All keys are lowercase because the detector normalises every
+// extracted name with strings.ToLower before the lookup.
+var cmakePseudoPackages = map[string]bool{
+	"threads":                        true, // pthreads / Win32 threading — no external package identity
+	"cmake":                          true, // CMake itself
+	"ctest":                          true, // CMake test driver
+	"cpack":                          true, // CMake packaging tool
+	"packagehandlestandardargs":      true, // CMake helper module
+	"cmakepackageconfighelpers":       true, // CMake helper module
+	"findpackagehandlestandardargs":   true, // legacy alias for PackageHandleStandardArgs
+}
+
 // CMakeDetector detects dependencies declared via find_package() in
 // CMakeLists.txt and *.cmake files.
 //
@@ -91,6 +106,11 @@ func parseCMakeFile(path string, deps map[string]*Dependency, w io.Writer) error
 		version := "unknown"
 		if m[2] != "" {
 			version = m[2]
+		}
+
+		// Skip CMake built-in modules that have no third-party package identity.
+		if cmakePseudoPackages[name] {
+			continue
 		}
 
 		if existing, ok := deps[name]; ok {

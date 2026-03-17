@@ -163,6 +163,40 @@ func TestCMakeDetector_Detect_WritesWarningToW(t *testing.T) {
 	}
 }
 
+// TestCMakeDetector_Detect_PseudoPackagesFiltered verifies that CMake built-in
+// module names are excluded from the results and real third-party packages are
+// not affected by the filter.
+func TestCMakeDetector_Detect_PseudoPackagesFiltered(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "CMakeLists.txt")
+	writeFile(t, f,
+		"find_package(Threads REQUIRED)\n"+
+			"find_package(CMakePackageConfigHelpers REQUIRED)\n"+
+			"find_package(OpenSSL 1.1 REQUIRED)\n")
+
+	d := detector.CMakeDetector{}
+	deps, err := d.Detect(context.Background(), []string{f})
+	if err != nil {
+		t.Fatalf("Detect() unexpected error: %v", err)
+	}
+
+	byName := make(map[string]bool, len(deps))
+	for _, dep := range deps {
+		byName[dep.Name] = true
+	}
+
+	// CMake built-in modules must be absent.
+	for _, pseudo := range []string{"threads", "cmakepackageconfighelpers"} {
+		if byName[pseudo] {
+			t.Errorf("pseudo-package %q should be filtered out but appeared in results", pseudo)
+		}
+	}
+
+	// Real third-party package must still be present.
+	if !byName["openssl"] {
+		t.Errorf("dependency %q expected but not found; got: %v", "openssl", deps)
+	}
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 func containsStr(slice []string, s string) bool {

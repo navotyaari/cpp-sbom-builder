@@ -50,6 +50,17 @@ Two rules are applied in `scanFileIncludes`:
 1. **Explicit relative paths** (`./foo.h`, `../bar.h`) are skipped unconditionally. These can only reference files within the same repository tree.
 2. **Quoted includes with path separators** (`#include "internal/myheader.h"`) are skipped. The C++ convention is that angle-bracket includes (`<lib/header.h>`) refer to installed system or third-party libraries, while quoted includes with slashes refer to project-local files. Only quoted flat names (`#include "config.h"`) are considered, since some projects install single-file third-party headers directly.
 
+### How CMake pseudo-packages are filtered
+
+`CMakeDetector` maintains a package-level `map[string]bool` called `cmakePseudoPackages`. After extracting and lowercasing a `find_package()` name, `parseCMakeFile` checks the map and skips the entry if it matches. The filter currently covers:
+
+- `threads` — resolves to pthreads or the Win32 threading API; has no external package identity
+- `cmake`, `ctest`, `cpack` — CMake's own toolchain components
+- `packagehandlestandardargs`, `findpackagehandlestandardargs` — CMake helper modules included by other Find-modules
+- `cmakepackageconfighelpers` — CMake utility module for writing config files
+
+The filter is a static allowlist and is not user-configurable. Because the CMake ecosystem has hundreds of helper modules beyond this set, less common built-in modules that are not yet listed will still produce false-positive SBOM components.
+
 ### Remaining sources of false positives
 
 - **Vendored header-only libraries.** A project that copies `nlohmann/json.hpp` or `stb_image.h` directly into its source tree will produce a component entry. The tool has no way to distinguish a vendored copy from an installed external dependency purely from the `#include` directive.
