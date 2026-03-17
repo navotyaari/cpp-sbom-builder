@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"testing"
 
 	"cpp-sbom-builder/internal/detector"
@@ -530,6 +532,41 @@ func TestIncludeScanner_Detect_EmptyDir(t *testing.T) {
 	}
 	if len(deps) != 0 {
 		t.Errorf("expected 0 deps, got %d", len(deps))
+	}
+}
+
+// TestIncludeScanner_UnreadableFileWritesWarningToW verifies that when a source
+// file cannot be opened, the warning is written to the W field and Detect still
+// returns nil with zero dependencies (warn-and-continue, not abort).
+func TestIncludeScanner_UnreadableFileWritesWarningToW(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0o000 does not reliably prevent reads on Windows")
+	}
+
+	unreadable := filepath.Join(t.TempDir(), "app.cpp")
+	writeFile(t, unreadable, "#include <openssl/ssl.h>\n")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(unreadable, 0o644) }) // allow t.TempDir cleanup
+
+	var buf strings.Builder
+	s := detector.IncludeScanner{W: &buf}
+	deps, detectErr := s.Detect(context.Background(), []string{unreadable})
+
+	if detectErr != nil {
+		t.Errorf("Detect() returned error %v, want nil", detectErr)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected 0 deps, got %d", len(deps))
+	}
+
+	captured := buf.String()
+	if !strings.Contains(captured, "include scanner: skipping") {
+		t.Errorf("warning output = %q, want it to contain %q", captured, "include scanner: skipping")
+	}
+	if !strings.Contains(captured, unreadable) {
+		t.Errorf("warning output = %q, want it to contain path %q", captured, unreadable)
 	}
 }
 
