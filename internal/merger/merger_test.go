@@ -146,21 +146,24 @@ func TestMerge_EvidenceDeduplication(t *testing.T) {
 // TestMerge_NilAndEmptyInputs verifies graceful handling of nil/empty slices.
 func TestMerge_NilAndEmptyInputs(t *testing.T) {
 	tests := []struct {
-		name  string
-		input [][]detector.Dependency
+		name      string
+		input     [][]detector.Dependency
+		wantCount int
 	}{
-		{"nil input", nil},
-		{"empty outer slice", [][]detector.Dependency{}},
-		{"empty inner slices", [][]detector.Dependency{{}, {}, {}}},
-		{"mixed nil and non-nil", [][]detector.Dependency{nil, {dep("zlib", "1.2.11", "cmake", "/f")}, nil}},
+		{"nil input", nil, 0},
+		{"empty outer slice", [][]detector.Dependency{}, 0},
+		{"empty inner slices", [][]detector.Dependency{{}, {}, {}}, 0},
+		{"mixed nil and non-nil", [][]detector.Dependency{nil, {dep("zlib", "1.2.11", "cmake", "/f")}, nil}, 1},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := merger.Merge(tc.input)
-			// Should not panic; result count depends on input.
-			_ = got
+			// Should not panic; assert the result count is correct.
+			if len(got) != tc.wantCount {
+				t.Errorf("Merge(%q): got %d results, want %d", tc.name, len(got), tc.wantCount)
+			}
 		})
 	}
 }
