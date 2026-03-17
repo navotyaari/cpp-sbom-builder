@@ -2,8 +2,11 @@ package detector_test
 
 import (
 	"context"
+	"io"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"cpp-sbom-builder/internal/detector"
@@ -98,6 +101,56 @@ func TestCMakeDetector_Detect_ContextCancelled(t *testing.T) {
 	// Either context.Canceled is returned or no results — both are acceptable.
 	// The important guarantee is that it does not panic.
 	_ = err
+}
+
+// TestParseCMakeFile_UnreadableFileLogsWarning verifies that when parseCMakeFile
+// cannot open a file it writes a warning to os.Stderr and Detect still returns
+// nil (the walk continues).
+func TestParseCMakeFile_UnreadableFileLogsWarning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0o000 does not reliably prevent reads on Windows")
+	}
+
+	root := t.TempDir()
+	unreadable := filepath.Join(root, "CMakeLists.txt")
+	writeFile(t, unreadable, "find_package(OpenSSL REQUIRED)\n")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(unreadable, 0o644) }) // allow t.TempDir cleanup
+
+	// Redirect os.Stderr to a pipe so we can capture the warning.
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+
+	d := detector.CMakeDetector{}
+	_, detectErr := d.Detect(context.Background(), root)
+
+	// Restore os.Stderr before reading the pipe to avoid a deadlock.
+	w.Close()
+	os.Stderr = origStderr
+
+	var buf strings.Builder
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("reading captured stderr: %v", err)
+	}
+	r.Close()
+
+	if detectErr != nil {
+		t.Errorf("Detect() returned error %v, want nil", detectErr)
+	}
+
+	captured := buf.String()
+	if !strings.Contains(captured, "cmake detector: skipping") {
+		t.Errorf("stderr = %q, want it to contain %q", captured, "cmake detector: skipping")
+	}
+	if !strings.Contains(captured, unreadable) {
+		t.Errorf("stderr = %q, want it to contain path %q", captured, unreadable)
+	}
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
