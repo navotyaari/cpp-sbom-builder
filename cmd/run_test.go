@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,5 +79,25 @@ func TestRun_SkipDirContentsNotDetected(t *testing.T) {
 		if c.Name == "should-not-appear" {
 			t.Errorf("component %q from inside a skip-listed directory appeared in output; skip-dir pruning is broken", c.Name)
 		}
+	}
+}
+
+// TestRun_ContextCancellation verifies that Run returns context.Canceled when
+// the context is cancelled before the call. The walker checks ctx.Done on
+// every entry, so a pre-cancelled context causes the walk to abort immediately
+// and Run to propagate the error back to the caller.
+func TestRun_ContextCancellation(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(t.TempDir(), "sbom.json")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before Run is called
+
+	err := Run(ctx, &strings.Builder{}, dir, outputPath)
+	if err == nil {
+		t.Fatal("Run() returned nil error, want context.Canceled")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Run() error = %v, want errors.Is(err, context.Canceled) == true", err)
 	}
 }
