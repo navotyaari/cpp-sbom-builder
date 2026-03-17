@@ -77,10 +77,12 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 	}
 
 	// ── Step 2: Run all detectors concurrently ───────────────────────────────
+	// Detectors that emit per-file warnings receive the same io.Writer as the
+	// rest of the pipeline so all diagnostic output goes to one place.
 	detectors := []detector.Detector{
-		detector.CMakeDetector{},
-		detector.VcpkgDetector{},
-		detector.ConanDetector{},
+		detector.CMakeDetector{W: w},
+		detector.VcpkgDetector{W: w},
+		detector.ConanDetector{W: w},
 		detector.IncludeScanner{},
 	}
 

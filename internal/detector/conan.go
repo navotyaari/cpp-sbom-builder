@@ -4,13 +4,19 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 // ConanDetector detects dependencies declared in conanfile.txt manifests.
-type ConanDetector struct{}
+//
+// W is the writer used for per-file warning messages (unreadable or
+// unparseable files).  If W is nil, warnings are written to os.Stderr.
+type ConanDetector struct {
+	W io.Writer
+}
 
 // Name implements Detector.
 func (c ConanDetector) Name() string { return "conan" }
@@ -20,6 +26,7 @@ func (c ConanDetector) Name() string { return "conan" }
 // [requires] section of each, and returns one Dependency per entry.
 func (c ConanDetector) Detect(ctx context.Context, files []string) ([]Dependency, error) {
 	var deps []Dependency
+	w := warnWriter(c.W)
 
 	for _, path := range files {
 		select {
@@ -34,7 +41,7 @@ func (c ConanDetector) Detect(ctx context.Context, files []string) ([]Dependency
 
 		found, parseErr := parseConanFile(path)
 		if parseErr != nil {
-			fmt.Fprintf(os.Stderr, "conan detector: skipping %s: %v\n", path, parseErr)
+			fmt.Fprintf(w, "conan detector: skipping %s: %v\n", path, parseErr)
 			continue
 		}
 

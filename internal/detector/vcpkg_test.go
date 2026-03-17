@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cpp-sbom-builder/internal/detector"
@@ -108,5 +109,34 @@ func TestVcpkgDetector_Detect_EmptyFilesReturnsEmpty(t *testing.T) {
 	}
 	if len(deps) != 0 {
 		t.Errorf("expected 0 deps for empty file list, got %d", len(deps))
+	}
+}
+
+// TestVcpkgDetector_Detect_WritesWarningToW verifies that when a vcpkg.json
+// file contains malformed JSON, the warning is written to the W field and
+// Detect still returns nil (iteration continues over remaining files).
+func TestVcpkgDetector_Detect_WritesWarningToW(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "vcpkg.json")
+	if err := os.WriteFile(bad, []byte(`{ this is not valid json `), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var buf strings.Builder
+	d := detector.VcpkgDetector{W: &buf}
+	deps, detectErr := d.Detect(context.Background(), []string{bad})
+
+	if detectErr != nil {
+		t.Errorf("Detect() returned error %v, want nil", detectErr)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected 0 deps, got %d", len(deps))
+	}
+
+	captured := buf.String()
+	if !strings.Contains(captured, "vcpkg detector: skipping") {
+		t.Errorf("warning output = %q, want it to contain %q", captured, "vcpkg detector: skipping")
+	}
+	if !strings.Contains(captured, bad) {
+		t.Errorf("warning output = %q, want it to contain path %q", captured, bad)
 	}
 }

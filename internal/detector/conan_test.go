@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"cpp-sbom-builder/internal/detector"
@@ -172,5 +174,40 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+}
+
+// TestConanDetector_Detect_WritesWarningToW verifies that when a conanfile.txt
+// cannot be opened, the warning is written to the W field and Detect still
+// returns nil (iteration continues over remaining files).
+func TestConanDetector_Detect_WritesWarningToW(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0o000 does not reliably prevent reads on Windows")
+	}
+
+	unreadable := filepath.Join(t.TempDir(), "conanfile.txt")
+	writeFile(t, unreadable, "[requires]\nopenssl/1.1.1\n")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(unreadable, 0o644) })
+
+	var buf strings.Builder
+	d := detector.ConanDetector{W: &buf}
+	deps, detectErr := d.Detect(context.Background(), []string{unreadable})
+
+	if detectErr != nil {
+		t.Errorf("Detect() returned error %v, want nil", detectErr)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected 0 deps, got %d", len(deps))
+	}
+
+	captured := buf.String()
+	if !strings.Contains(captured, "conan detector: skipping") {
+		t.Errorf("warning output = %q, want it to contain %q", captured, "conan detector: skipping")
+	}
+	if !strings.Contains(captured, unreadable) {
+		t.Errorf("warning output = %q, want it to contain path %q", captured, unreadable)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,7 +23,12 @@ var findPackageRe = regexp.MustCompile(
 
 // CMakeDetector detects dependencies declared via find_package() in
 // CMakeLists.txt and *.cmake files.
-type CMakeDetector struct{}
+//
+// W is the writer used for per-file warning messages (unreadable files, scan
+// errors).  If W is nil, warnings are written to os.Stderr.
+type CMakeDetector struct {
+	W io.Writer
+}
 
 // Name implements Detector.
 func (c CMakeDetector) Name() string { return "cmake" }
@@ -32,6 +38,7 @@ func (c CMakeDetector) Name() string { return "cmake" }
 // calls from each, and returns one Dependency per unique normalised package name.
 func (c CMakeDetector) Detect(ctx context.Context, files []string) ([]Dependency, error) {
 	deps := map[string]*Dependency{}
+	w := warnWriter(c.W)
 
 	for _, path := range files {
 		select {
@@ -44,7 +51,7 @@ func (c CMakeDetector) Detect(ctx context.Context, files []string) ([]Dependency
 			continue
 		}
 
-		if err := parseCMakeFile(path, deps); err != nil {
+		if err := parseCMakeFile(path, deps, w); err != nil {
 			return nil, err
 		}
 	}
@@ -62,10 +69,11 @@ func isCMakeFile(name string) bool {
 }
 
 // parseCMakeFile scans a single file and upserts entries into deps.
-func parseCMakeFile(path string, deps map[string]*Dependency) error {
+// Warnings about unreadable files or scan errors are written to w.
+func parseCMakeFile(path string, deps map[string]*Dependency, w io.Writer) error {
 	f, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cmake detector: skipping %s: %v\n", path, err)
+		fmt.Fprintf(w, "cmake detector: skipping %s: %v\n", path, err)
 		return nil // unreadable file → skip silently
 	}
 	defer f.Close()
@@ -107,7 +115,18 @@ func parseCMakeFile(path string, deps map[string]*Dependency) error {
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "cmake detector: skipping %s: %v\n", path, err)
+		fmt.Fprintf(w, "cmake detector: skipping %s: %v\n", path, err)
 	}
 	return nil
+}
+
+// warnWriter returns w if non-nil, otherwise os.Stderr.
+// This preserves the zero-value behaviour of each detector struct: a detector
+// constructed without an explicit W still writes warnings to os.Stderr, exactly
+// as it did before this change.
+func warnWriter(w io.Writer) io.Writer {
+	if w != nil {
+		return w
+	}
+	return os.Stderr
 }
