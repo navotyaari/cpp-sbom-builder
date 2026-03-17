@@ -36,7 +36,31 @@ type vcpkgDepObject struct {
 func (v VcpkgDetector) Detect(ctx context.Context, root string) ([]Dependency, error) {
 	var deps []Dependency
 
-	err := walkDir(ctx, root, func(path string, d fs.DirEntry) error {
+	err := walkDir(ctx, root, vcpkgCallback(&deps))
+	if err != nil {
+		return nil, err
+	}
+
+	return deps, nil
+}
+
+// DetectFiles implements FilesDetector.
+// It applies the same logic as Detect but operates on a pre-built file list
+// rather than walking the filesystem independently.
+func (v VcpkgDetector) DetectFiles(ctx context.Context, files []string) ([]Dependency, error) {
+	var deps []Dependency
+
+	err := walkFiles(ctx, files, vcpkgCallback(&deps))
+	if err != nil {
+		return nil, err
+	}
+
+	return deps, nil
+}
+
+// vcpkgCallback returns the walkFn shared by both Detect and DetectFiles.
+func vcpkgCallback(deps *[]Dependency) walkFn {
+	return func(path string, d fs.DirEntry) error {
 		if d.IsDir() || d.Name() != "vcpkg.json" {
 			return nil
 		}
@@ -47,15 +71,9 @@ func (v VcpkgDetector) Detect(ctx context.Context, root string) ([]Dependency, e
 			return nil // skip malformed files silently
 		}
 
-		deps = append(deps, found...)
+		*deps = append(*deps, found...)
 		return nil
-	})
-
-	if err != nil {
-		return nil, err
 	}
-
-	return deps, nil
 }
 
 // parseVcpkgFile decodes a single vcpkg.json and returns its dependencies.

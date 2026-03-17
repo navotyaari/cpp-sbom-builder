@@ -58,8 +58,29 @@ func (s IncludeScanner) Detect(ctx context.Context, root string) ([]Dependency, 
 		return nil, err
 	}
 
+	return s.scanFiles(ctx, files), nil
+}
+
+// DetectFiles implements FilesDetector.
+// It applies the same logic as Detect but operates on a pre-built file list
+// rather than walking the filesystem independently.
+func (s IncludeScanner) DetectFiles(ctx context.Context, files []string) ([]Dependency, error) {
+	// Filter to C++ source and header files only.
+	var candidates []string
+	for _, path := range files {
+		if cppExtensions[strings.ToLower(filepath.Ext(filepath.Base(path)))] {
+			candidates = append(candidates, path)
+		}
+	}
+
+	return s.scanFiles(ctx, candidates), nil
+}
+
+// scanFiles fans the given file list across a worker pool and merges results.
+// It is the shared implementation used by both Detect and DetectFiles.
+func (s IncludeScanner) scanFiles(ctx context.Context, files []string) []Dependency {
 	if len(files) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	// Worker pool: buffered work channel + WaitGroup.
@@ -122,7 +143,7 @@ func (s IncludeScanner) Detect(ctx context.Context, root string) ([]Dependency, 
 	for _, dep := range merged {
 		deps = append(deps, *dep)
 	}
-	return deps, nil
+	return deps
 }
 
 // scanFileIncludes opens a single source file, extracts #include headers,

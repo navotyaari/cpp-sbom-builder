@@ -13,9 +13,10 @@ import (
 )
 
 // findPackageRe matches find_package(...) calls and captures:
-//   group 1 – package name
-//   group 2 – optional version number (first token after the name if it looks
-//              like a version, i.e. starts with a digit)
+//
+//	group 1 – package name
+//	group 2 – optional version number (first token after the name if it looks
+//	           like a version, i.e. starts with a digit)
 var findPackageRe = regexp.MustCompile(
 	`(?i)find_package\s*\(\s*(\w+)(?:\s+(\d[\d.]*))?`,
 )
@@ -31,11 +32,33 @@ func (c CMakeDetector) Name() string { return "cmake" }
 // It walks root for CMakeLists.txt / *.cmake files, extracts find_package()
 // calls, and returns one Dependency per unique normalised package name.
 func (c CMakeDetector) Detect(ctx context.Context, root string) ([]Dependency, error) {
-	// deps accumulates results keyed by normalised name so duplicates
-	// (same package in multiple files) are merged into one entry.
 	deps := map[string]*Dependency{}
 
-	err := walkDir(ctx, root, func(path string, d fs.DirEntry) error {
+	err := walkDir(ctx, root, cmakeCallback(deps))
+	if err != nil {
+		return nil, err
+	}
+
+	return cmakeDepsToSlice(deps), nil
+}
+
+// DetectFiles implements FilesDetector.
+// It applies the same logic as Detect but operates on a pre-built file list
+// rather than walking the filesystem independently.
+func (c CMakeDetector) DetectFiles(ctx context.Context, files []string) ([]Dependency, error) {
+	deps := map[string]*Dependency{}
+
+	err := walkFiles(ctx, files, cmakeCallback(deps))
+	if err != nil {
+		return nil, err
+	}
+
+	return cmakeDepsToSlice(deps), nil
+}
+
+// cmakeCallback returns the walkFn shared by both Detect and DetectFiles.
+func cmakeCallback(deps map[string]*Dependency) walkFn {
+	return func(path string, d fs.DirEntry) error {
 		if d.IsDir() {
 			return nil
 		}
@@ -45,17 +68,16 @@ func (c CMakeDetector) Detect(ctx context.Context, root string) ([]Dependency, e
 		}
 
 		return parseCMakeFile(path, deps)
-	})
-
-	if err != nil {
-		return nil, err
 	}
+}
 
+// cmakeDepsToSlice converts the accumulator map to a flat slice.
+func cmakeDepsToSlice(deps map[string]*Dependency) []Dependency {
 	result := make([]Dependency, 0, len(deps))
 	for _, dep := range deps {
 		result = append(result, *dep)
 	}
-	return result, nil
+	return result
 }
 
 // isCMakeFile reports whether name is a CMake source file.

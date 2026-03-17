@@ -21,7 +21,31 @@ func (c ConanDetector) Name() string { return "conan" }
 func (c ConanDetector) Detect(ctx context.Context, root string) ([]Dependency, error) {
 	var deps []Dependency
 
-	err := walkDir(ctx, root, func(path string, d fs.DirEntry) error {
+	err := walkDir(ctx, root, conanCallback(&deps))
+	if err != nil {
+		return nil, err
+	}
+
+	return deps, nil
+}
+
+// DetectFiles implements FilesDetector.
+// It applies the same logic as Detect but operates on a pre-built file list
+// rather than walking the filesystem independently.
+func (c ConanDetector) DetectFiles(ctx context.Context, files []string) ([]Dependency, error) {
+	var deps []Dependency
+
+	err := walkFiles(ctx, files, conanCallback(&deps))
+	if err != nil {
+		return nil, err
+	}
+
+	return deps, nil
+}
+
+// conanCallback returns the walkFn shared by both Detect and DetectFiles.
+func conanCallback(deps *[]Dependency) walkFn {
+	return func(path string, d fs.DirEntry) error {
 		if d.IsDir() || d.Name() != "conanfile.txt" {
 			return nil
 		}
@@ -32,15 +56,9 @@ func (c ConanDetector) Detect(ctx context.Context, root string) ([]Dependency, e
 			return nil
 		}
 
-		deps = append(deps, found...)
+		*deps = append(*deps, found...)
 		return nil
-	})
-
-	if err != nil {
-		return nil, err
 	}
-
-	return deps, nil
 }
 
 // parseConanFile reads a conanfile.txt and extracts dependencies from the
@@ -93,8 +111,8 @@ func parseConanFile(path string) ([]Dependency, error) {
 
 // parseConanRequire parses a single [requires] line of the form:
 //
-//	<name>/<version>
-//	<name>/<version>@<user>/<channel>
+//	<n>/<version>
+//	<n>/<version>@<user>/<channel>
 //
 // Returns the normalised name, version, and true on success.
 func parseConanRequire(line string) (name, version string, ok bool) {

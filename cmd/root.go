@@ -15,6 +15,7 @@ import (
 	"cpp-sbom-builder/internal/detector"
 	"cpp-sbom-builder/internal/formatter"
 	"cpp-sbom-builder/internal/merger"
+	"cpp-sbom-builder/internal/walker"
 )
 
 // Execute parses CLI flags and runs the full SBOM pipeline.
@@ -66,7 +67,16 @@ func validateDir(dir string) error {
 // Diagnostic warnings are written to w. The pipeline respects ctx cancellation:
 // if ctx is cancelled before all detectors complete, Run returns ctx.Err().
 func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
-	// ── Step 1: Run all detectors concurrently ───────────────────────────────
+	// ── Step 1: Single shared filesystem walk ────────────────────────────────
+	// Walk the project tree once with skip-dir pruning and distribute the
+	// resulting file list to every detector.  This replaces four independent
+	// WalkDir calls (one per detector) with a single pass.
+	files, err := walker.Walk(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("walking %q: %w", dir, err)
+	}
+
+	// ── Step 2: Run all detectors concurrently ───────────────────────────────
 	detectors := []detector.Detector{
 		detector.CMakeDetector{},
 		detector.VcpkgDetector{},
@@ -87,7 +97,15 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			deps, err := d.Detect(ctx, dir)
+			var deps []detector.Dependency
+			var err error
+			// Use the pre-walked file list when the detector supports it;
+			// fall back to an independent walk for detectors that do not.
+			if fd, ok := d.(detector.FilesDetector); ok {
+				deps, err = fd.DetectFiles(ctx, files)
+			} else {
+				deps, err = d.Detect(ctx, dir)
+			}
 			resultsCh <- detResult{deps: deps, err: err}
 		}()
 	}
@@ -118,17 +136,17 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		return ctx.Err()
 	}
 
-	// ── Step 2: Merge ─────────────────────────────────────────────────────────
+	// ── Step 3: Merge ─────────────────────────────────────────────────────────
 	merged := merger.Merge(allResults)
 
-	// ── Step 3: Format ────────────────────────────────────────────────────────
+	// ── Step 4: Format ────────────────────────────────────────────────────────
 	projectName := filepath.Base(dir)
 	report, err := formatter.Format(merged, projectName)
 	if err != nil {
 		return fmt.Errorf("formatting SBOM: %w", err)
 	}
 
-	// ── Step 4: Write output ─────────────────────────────────────────────────
+	// ── Step 5: Write output ─────────────────────────────────────────────────
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("serialising SBOM: %w", err)
