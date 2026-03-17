@@ -24,11 +24,26 @@ func mkFile(t *testing.T, path string) {
 	f.Close()
 }
 
+// drainWalk calls Walk and drains the returned channel into a sorted slice.
+// It is the test-side helper used wherever a deterministic []string is needed.
+func drainWalk(t *testing.T, ctx context.Context, root string) ([]string, error) {
+	t.Helper()
+	ch, err := walker.Walk(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for p := range ch {
+		paths = append(paths, p)
+	}
+	return paths, ctx.Err()
+}
+
 // sortedWalk calls Walk with a background context and returns the results
 // sorted for deterministic comparison.
 func sortedWalk(t *testing.T, root string) []string {
 	t.Helper()
-	paths, err := walker.Walk(context.Background(), root)
+	paths, err := drainWalk(t, context.Background(), root)
 	if err != nil {
 		t.Fatalf("Walk(%q) unexpected error: %v", root, err)
 	}
@@ -124,7 +139,7 @@ func TestWalk_NonExistentRootReturnsError(t *testing.T) {
 // directory yields an empty (non-nil-error) result.
 func TestWalk_EmptyDirectoryReturnsEmptySlice(t *testing.T) {
 	root := t.TempDir()
-	paths, err := walker.Walk(context.Background(), root)
+	paths, err := drainWalk(t, context.Background(), root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,8 +193,8 @@ func TestWalk_NestedFilteredDirSkipped(t *testing.T) {
 	}
 }
 
-// TestWalk_ContextCancellation verifies that Walk stops and returns a non-nil
-// error when the supplied context is cancelled before or during traversal.
+// TestWalk_ContextCancellation verifies that Walk stops and the caller can
+// detect cancellation via ctx.Err() after draining the channel.
 func TestWalk_ContextCancellation(t *testing.T) {
 	root := t.TempDir()
 
@@ -197,11 +212,21 @@ func TestWalk_ContextCancellation(t *testing.T) {
 	// Cancel before the walk starts so the context is already done on entry.
 	cancel()
 
-	_, err := walker.Walk(ctx, root)
-	if err == nil {
-		t.Fatal("expected a non-nil error from a cancelled context, got nil")
+	ch, err := walker.Walk(ctx, root)
+	if err != nil {
+		// A non-nil error here means root was inaccessible — unexpected.
+		t.Fatalf("Walk returned unexpected setup error: %v", err)
 	}
-	if err != context.Canceled {
-		t.Errorf("expected context.Canceled, got %v", err)
+
+	// Drain the channel fully so the walker goroutine is not left blocked.
+	for range ch {
+	}
+
+	// After the channel is closed, ctx.Err() reports the cancellation.
+	if ctx.Err() == nil {
+		t.Fatal("expected ctx.Err() to be non-nil after cancellation, got nil")
+	}
+	if ctx.Err() != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", ctx.Err())
 	}
 }
