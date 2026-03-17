@@ -67,18 +67,11 @@ func validateDir(dir string) error {
 // Diagnostic warnings are written to w. The pipeline respects ctx cancellation:
 // if ctx is cancelled before all detectors complete, Run returns ctx.Err().
 func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
-	// ── Step 1: Start streaming filesystem walk ──────────────────────────────
-	// Walk returns a channel immediately. File paths are sent into it as they
-	// are discovered, so detectors begin receiving paths before the traversal
-	// is complete. The channel is closed by the walker goroutine when done.
 	fileCh, err := walker.Walk(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("walking %q: %w", dir, err)
 	}
 
-	// ── Step 2: Fan the walker channel out to per-detector channels ──────────
-	// Each detector receives its own buffered channel so that a slow detector
-	// does not stall the fan-out goroutine and block the walker.
 	detectors := []detector.Detector{
 		detector.CMakeDetector{W: w},
 		detector.VcpkgDetector{W: w},
@@ -86,27 +79,50 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		detector.IncludeScanner{W: w},
 	}
 
-	// detectorChBuf is sized to match walkBufSize so the fan-out goroutine can
-	// keep pace with the walker without blocking even if one detector is slow.
+	detChans := fanOut(fileCh, detectors)
+
+	allResults, err := runDetectors(ctx, w, detectors, detChans)
+	if err != nil {
+		return err
+	}
+
+	merged := merger.Merge(allResults)
+
+	report, err := formatter.Format(merged, filepath.Base(dir))
+	if err != nil {
+		return fmt.Errorf("formatting SBOM: %w", err)
+	}
+
+	return writeOutput(outputPath, report, w)
+}
+
+// fanOut creates one buffered channel per detector, launches a goroutine that
+// broadcasts every path received from fileCh to all per-detector channels, and
+// returns the channel slice. The broadcast goroutine closes all per-detector
+// channels once fileCh is drained.
+//
+// detectorChBuf is sized to match the walker's own buffer so the fan-out
+// goroutine can keep pace with the walker without blocking even if one detector
+// is momentarily slow.
+func fanOut(fileCh chan string, detectors []detector.Detector) []chan string {
 	const detectorChBuf = 64
 	detChans := make([]chan string, len(detectors))
 	for i := range detChans {
 		detChans[i] = make(chan string, detectorChBuf)
 	}
 
-	// Fan-out: read every path from the walker and broadcast it to all
-	// per-detector channels, then close them when the walker channel closes.
 	go func() {
 		for path := range fileCh {
 			// Blocking send — no select or cancellation check needed here.
-			// All detector goroutines are already running (launched below) and
-			// continuously draining their channels, so each send completes as
-			// soon as the receiving goroutine's next loop iteration fires or the
-			// per-detector buffer has room. If a detector goroutine were to stop
-			// draining (e.g. due to a panic), this send would block indefinitely,
-			// stalling the fan-out and walker goroutines. That is a known
-			// limitation: the design assumes all detector goroutines run to
-			// completion, which is enforced by the WaitGroup below.
+			// All detector goroutines are already running (launched in
+			// runDetectors) and continuously draining their channels, so each
+			// send completes as soon as the receiving goroutine's next loop
+			// iteration fires or the per-detector buffer has room. If a detector
+			// goroutine were to stop draining (e.g. due to a panic), this send
+			// would block indefinitely, stalling the fan-out and walker
+			// goroutines. That is a known limitation: the design assumes all
+			// detector goroutines run to completion, which is enforced by the
+			// WaitGroup inside runDetectors.
 			for _, dc := range detChans {
 				dc <- path
 			}
@@ -116,9 +132,17 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		}
 	}()
 
-	// ── Step 3: Run all detectors concurrently ───────────────────────────────
-	// Each detector goroutine drains its channel into a local []string then
-	// calls Detect, keeping the Detector interface unchanged.
+	return detChans
+}
+
+// runDetectors launches one goroutine per detector. Each goroutine drains its
+// per-detector channel into a []string, calls Detect, and sends the result to
+// a shared results channel. runDetectors blocks until all detectors finish,
+// then returns the collected dependency slices.
+//
+// Context cancellation is propagated: if ctx is cancelled while results are
+// being collected, runDetectors returns ctx.Err() immediately.
+func runDetectors(ctx context.Context, w io.Writer, detectors []detector.Detector, detChans []chan string) ([][]detector.Dependency, error) {
 	type detResult struct {
 		deps []detector.Dependency
 		err  error
@@ -152,7 +176,7 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		if r.err != nil {
 			// Propagate context cancellation immediately.
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return nil, ctx.Err()
 			}
 			// Log detector errors but continue — one failing detector should
 			// not abort the whole scan.
@@ -165,20 +189,15 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 	// Final cancellation check: covers both walker cancellation and any
 	// cancellation that occurred after the results channel was drained.
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 
-	// ── Step 4: Merge ─────────────────────────────────────────────────────────
-	merged := merger.Merge(allResults)
+	return allResults, nil
+}
 
-	// ── Step 5: Format ────────────────────────────────────────────────────────
-	projectName := filepath.Base(dir)
-	report, err := formatter.Format(merged, projectName)
-	if err != nil {
-		return fmt.Errorf("formatting SBOM: %w", err)
-	}
-
-	// ── Step 6: Write output ─────────────────────────────────────────────────
+// writeOutput marshals report to indented JSON, writes it to outputPath, and
+// prints a confirmation message to w.
+func writeOutput(outputPath string, report formatter.SBOMReport, w io.Writer) error {
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("serialising SBOM: %w", err)
