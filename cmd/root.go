@@ -98,6 +98,15 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 	// per-detector channels, then close them when the walker channel closes.
 	go func() {
 		for path := range fileCh {
+			// Blocking send — no select or cancellation check needed here.
+			// All detector goroutines are already running (launched below) and
+			// continuously draining their channels, so each send completes as
+			// soon as the receiving goroutine's next loop iteration fires or the
+			// per-detector buffer has room. If a detector goroutine were to stop
+			// draining (e.g. due to a panic), this send would block indefinitely,
+			// stalling the fan-out and walker goroutines. That is a known
+			// limitation: the design assumes all detector goroutines run to
+			// completion, which is enforced by the WaitGroup below.
 			for _, dc := range detChans {
 				dc <- path
 			}
