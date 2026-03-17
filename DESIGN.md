@@ -92,7 +92,15 @@ Several approaches would increase version coverage:
 
 ### Concurrent detector design
 
-All four detectors run in separate goroutines launched by `cmd.Run`. Each detector walks the entire project tree independently and sends its results into a buffered channel. The channel is sized to the number of detectors so no goroutine ever blocks on send. A single closer goroutine calls `sync.WaitGroup.Wait()` then closes the channel, after which the main goroutine drains and merges results.
+> **Interface change note:** The original proposal described a `Detect(ctx context.Context, root string)` signature, where each detector would receive a root path and walk the filesystem itself. The implemented interface is:
+>
+> ```go
+> Detect(ctx context.Context, files []string) ([]Dependency, error)
+> ```
+>
+> This change was made during implementation to introduce a single shared `filepath.WalkDir` pass in `cmd/root.go`. The resulting flat, skip-dir-pruned file slice is passed to every detector instead of each detector walking the tree independently. This eliminates redundant I/O — the filesystem is traversed exactly once regardless of how many detectors run.
+
+All four detectors run in separate goroutines launched by `cmd.Run`. Rather than each detector walking the filesystem, `cmd/root.go` performs a single `filepath.WalkDir` pass and builds a flat, skip-dir-pruned `[]string` of absolute file paths. That slice is passed directly to each detector's `Detect` method. Each detector filters the list for the paths it cares about and reads those files; it never calls `filepath.WalkDir` itself. Results are sent into a buffered channel sized to the number of detectors so no goroutine ever blocks on send. A single closer goroutine calls `sync.WaitGroup.Wait()` then closes the channel, after which the main goroutine drains and merges results.
 
 This design means detector wall-clock time equals the slowest single detector, not their sum — on a 4-core machine scanning a 50k-file project this is roughly a 4× speedup over sequential execution.
 
@@ -118,8 +126,7 @@ The only material capability gap is conditional evaluation (`#ifdef`, CMake `if/
 
 At that scale several assumptions break:
 
-1. **Memory.** The current design accumulates all file paths in RAM before any processing. A streaming walker that feeds detectors via a shared channel would keep memory flat regardless of tree size.
-2. **Redundant tree traversal.** Each detector calls `filepath.WalkDir` independently, so the directory tree is read 4× per scan. A single shared walk that fans file paths out to detector-specific channels would reduce I/O by 4×.
-3. **Incremental scanning.** A monorepo rarely changes entirely between CI runs. A content-hash cache (e.g. keyed on `(path, mtime, size)`) could skip files unchanged since the last run, reducing scan time to near-zero on warm runs.
-4. **AST parsing for high-value directories.** For the `src/` subtrees that change frequently, investing in clang-based AST parsing of `#include` chains would eliminate the false-positive classes described in Section 2. The regex scanner could be retained for third-party vendored directories where a compile environment is unavailable.
-5. **Parallel manifest parsing.** With thousands of `CMakeLists.txt` files (common in large monorepos with many sub-projects), the CMake detector's sequential file processing would become a bottleneck. It should adopt the same GOMAXPROCS worker-pool pattern as `IncludeScanner`.
+1. **Memory.** The current implementation already performs a single shared `filepath.WalkDir` pass in `cmd/root.go`, so the directory tree is traversed only once. However, the resulting file path list is accumulated in RAM in full before any detector runs. A streaming walker that feeds detectors via a shared channel would keep memory flat regardless of tree size.
+2. **Incremental scanning.** A monorepo rarely changes entirely between CI runs. A content-hash cache (e.g. keyed on `(path, mtime, size)`) could skip files unchanged since the last run, reducing scan time to near-zero on warm runs.
+3. **AST parsing for high-value directories.** For the `src/` subtrees that change frequently, investing in clang-based AST parsing of `#include` chains would eliminate the false-positive classes described in Section 2. The regex scanner could be retained for third-party vendored directories where a compile environment is unavailable.
+4. **Parallel manifest parsing.** With thousands of `CMakeLists.txt` files (common in large monorepos with many sub-projects), the CMake detector's sequential file processing would become a bottleneck. It should adopt the same GOMAXPROCS worker-pool pattern as `IncludeScanner`.
