@@ -1,232 +1,184 @@
-package walker_test
+package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"sort"
-	"testing"
+	"sync"
+	"syscall"
 
-	"cpp-sbom-builder/internal/skipdir"
+	"cpp-sbom-builder/internal/detector"
+	"cpp-sbom-builder/internal/formatter"
+	"cpp-sbom-builder/internal/merger"
 	"cpp-sbom-builder/internal/walker"
 )
 
-// mkFile creates a file at the given path, creating parent directories as needed.
-func mkFile(t *testing.T, path string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q): %v", filepath.Dir(path), err)
+// Execute parses CLI flags and runs the full SBOM pipeline.
+func Execute() {
+	fs := flag.NewFlagSet("cpp-sbom-builder", flag.ContinueOnError)
+
+	dir := fs.String("dir", "", "Path to the C++ project root to scan (required)")
+	output := fs.String("output", "sbom.json", "Path for the output JSON file (default: sbom.json)")
+
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
-	f, err := os.Create(path)
+
+	if *dir == "" {
+		fmt.Fprintf(os.Stderr, "error: --dir is required\n\n")
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	if err := validateDir(*dir); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := Run(ctx, os.Stderr, *dir, *output); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// validateDir checks that dir is a non-empty path that exists and is a
+// directory. It returns a descriptive error suitable for display to the user.
+// The empty-string case is intentionally not handled here; Execute() catches
+// that before calling validateDir so it can also print fs.Usage().
+func validateDir(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("--dir path does not exist or is not a directory: %q", dir)
+	}
+	return nil
+}
+
+// Run executes the full SBOM pipeline. It is exported so that integration
+// tests can call it directly without going through Execute or touching os.Exit.
+// Diagnostic warnings are written to w. The pipeline respects ctx cancellation:
+// if ctx is cancelled before all detectors complete, Run returns ctx.Err().
+func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
+	// ── Step 1: Start streaming filesystem walk ──────────────────────────────
+	// Walk returns a channel immediately. File paths are sent into it as they
+	// are discovered, so detectors begin receiving paths before the traversal
+	// is complete. The channel is closed by the walker goroutine when done.
+	fileCh, err := walker.Walk(ctx, dir)
 	if err != nil {
-		t.Fatalf("Create(%q): %v", path, err)
-	}
-	f.Close()
-}
-
-// drainWalk calls Walk and drains the returned channel into a sorted slice.
-// It is the test-side helper used wherever a deterministic []string is needed.
-func drainWalk(t *testing.T, ctx context.Context, root string) ([]string, error) {
-	t.Helper()
-	ch, err := walker.Walk(ctx, root)
-	if err != nil {
-		return nil, err
-	}
-	var paths []string
-	for p := range ch {
-		paths = append(paths, p)
-	}
-	return paths, ctx.Err()
-}
-
-// sortedWalk calls Walk with a background context and returns the results
-// sorted for deterministic comparison.
-func sortedWalk(t *testing.T, root string) []string {
-	t.Helper()
-	paths, err := drainWalk(t, context.Background(), root)
-	if err != nil {
-		t.Fatalf("Walk(%q) unexpected error: %v", root, err)
-	}
-	sort.Strings(paths)
-	return paths
-}
-
-// TestWalk_ValidFilesReturned verifies that files in non-filtered directories
-// are present in the results.
-func TestWalk_ValidFilesReturned(t *testing.T) {
-	root := t.TempDir()
-
-	want := []string{
-		filepath.Join(root, "main.cpp"),
-		filepath.Join(root, "src", "util.cpp"),
-		filepath.Join(root, "include", "util.h"),
+		return fmt.Errorf("walking %q: %w", dir, err)
 	}
 
-	for _, p := range want {
-		mkFile(t, p)
+	// ── Step 2: Fan the walker channel out to per-detector channels ──────────
+	// Each detector receives its own buffered channel so that a slow detector
+	// does not stall the fan-out goroutine and block the walker.
+	detectors := []detector.Detector{
+		detector.CMakeDetector{W: w},
+		detector.VcpkgDetector{W: w},
+		detector.ConanDetector{W: w},
+		detector.IncludeScanner{W: w},
 	}
 
-	got := sortedWalk(t, root)
-	sort.Strings(want)
-
-	if len(got) != len(want) {
-		t.Fatalf("got %d paths, want %d\ngot:  %v\nwant: %v", len(got), len(want), got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("path[%d]: got %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-// TestWalk_SkippedDirsExcluded verifies that none of the skip-listed directory
-// names appear anywhere in the returned paths.
-func TestWalk_SkippedDirsExcluded(t *testing.T) {
-	root := t.TempDir()
-
-	// Files that MUST appear.
-	mkFile(t, filepath.Join(root, "CMakeLists.txt"))
-	mkFile(t, filepath.Join(root, "src", "app.cpp"))
-
-	// Files inside filtered directories that MUST NOT appear.
-	filtered := []string{
-		filepath.Join(root, ".git", "config"),
-		filepath.Join(root, "build", "app.o"),
-		filepath.Join(root, "cmake-build-debug", "app"),
-		filepath.Join(root, "cmake-build-release", "app"),
-		filepath.Join(root, "node_modules", "lodash", "index.js"),
-		filepath.Join(root, ".cache", "clangd", "index.bin"),
-	}
-	for _, p := range filtered {
-		mkFile(t, p)
+	// detectorChBuf is sized to match walkBufSize so the fan-out goroutine can
+	// keep pace with the walker without blocking even if one detector is slow.
+	const detectorChBuf = 64
+	detChans := make([]chan string, len(detectors))
+	for i := range detChans {
+		detChans[i] = make(chan string, detectorChBuf)
 	}
 
-	got := sortedWalk(t, root)
-
-	// Build a set for quick lookup.
-	gotSet := make(map[string]bool, len(got))
-	for _, p := range got {
-		gotSet[p] = true
-	}
-
-	for _, p := range filtered {
-		if gotSet[p] {
-			t.Errorf("filtered file should not appear in results: %q", p)
-		}
-	}
-
-	// Sanity-check that the visible files do appear.
-	for _, p := range []string{
-		filepath.Join(root, "CMakeLists.txt"),
-		filepath.Join(root, "src", "app.cpp"),
-	} {
-		if !gotSet[p] {
-			t.Errorf("expected file missing from results: %q", p)
-		}
-	}
-}
-
-// TestWalk_NonExistentRootReturnsError verifies that Walk returns a non-nil
-// error when the root path does not exist.
-func TestWalk_NonExistentRootReturnsError(t *testing.T) {
-	_, err := walker.Walk(context.Background(), "/this/path/does/not/exist/at/all")
-	if err == nil {
-		t.Fatal("expected an error for a non-existent root, got nil")
-	}
-}
-
-// TestWalk_EmptyDirectoryReturnsEmptySlice verifies that an empty root
-// directory yields an empty (non-nil-error) result.
-func TestWalk_EmptyDirectoryReturnsEmptySlice(t *testing.T) {
-	root := t.TempDir()
-	paths, err := drainWalk(t, context.Background(), root)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(paths) != 0 {
-		t.Errorf("expected 0 paths for empty dir, got %d: %v", len(paths), paths)
-	}
-}
-
-// TestWalk_NestedFilteredDirSkipped verifies that a skip-listed directory
-// nested deeper in the tree is also pruned.
-func TestWalk_NestedFilteredDirSkipped(t *testing.T) {
-	root := t.TempDir()
-
-	mkFile(t, filepath.Join(root, "lib", "core.cpp"))
-	mkFile(t, filepath.Join(root, "lib", "build", "core.o")) // nested "build" dir
-
-	got := sortedWalk(t, root)
-
-	// hasSkippedComponent returns true if any path component of p is a name
-	// that the canonical skipdir set requires to be pruned.
-	hasSkippedComponent := func(p string) bool {
-		for p != "" {
-			dir, base := filepath.Split(filepath.Clean(p))
-			if skipdir.ShouldSkip(base) {
-				return true
+	// Fan-out: read every path from the walker and broadcast it to all
+	// per-detector channels, then close them when the walker channel closes.
+	go func() {
+		for path := range fileCh {
+			for _, dc := range detChans {
+				dc <- path
 			}
-			// filepath.Split on a root like "/" returns ("", "/") — stop when
-			// we can no longer make progress.
-			if dir == p {
-				break
+		}
+		for _, dc := range detChans {
+			close(dc)
+		}
+	}()
+
+	// ── Step 3: Run all detectors concurrently ───────────────────────────────
+	// Each detector goroutine drains its channel into a local []string then
+	// calls Detect, keeping the Detector interface unchanged.
+	type detResult struct {
+		deps []detector.Dependency
+		err  error
+	}
+
+	resultsCh := make(chan detResult, len(detectors))
+	var wg sync.WaitGroup
+
+	for i, d := range detectors {
+		i, d := i, d
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var files []string
+			for path := range detChans[i] {
+				files = append(files, path)
 			}
-			p = filepath.Clean(dir)
+			deps, err := d.Detect(ctx, files)
+			resultsCh <- detResult{deps: deps, err: err}
+		}()
+	}
+
+	// Close results channel once all detectors finish.
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	var allResults [][]detector.Dependency
+	for r := range resultsCh {
+		if r.err != nil {
+			// Propagate context cancellation immediately.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// Log detector errors but continue — one failing detector should
+			// not abort the whole scan.
+			fmt.Fprintf(w, "warning: detector error: %v\n", r.err)
+			continue
 		}
-		return false
+		allResults = append(allResults, r.deps)
 	}
 
-	for _, p := range got {
-		if hasSkippedComponent(p) {
-			t.Errorf("file inside nested filtered dir should be excluded: %q", p)
-		}
+	// Final cancellation check: covers both walker cancellation and any
+	// cancellation that occurred after the results channel was drained.
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
-	found := false
-	for _, p := range got {
-		if p == filepath.Join(root, "lib", "core.cpp") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected lib/core.cpp in results, got: %v", got)
-	}
-}
+	// ── Step 4: Merge ─────────────────────────────────────────────────────────
+	merged := merger.Merge(allResults)
 
-// TestWalk_ContextCancellation verifies that Walk stops and the caller can
-// detect cancellation via ctx.Err() after draining the channel.
-func TestWalk_ContextCancellation(t *testing.T) {
-	root := t.TempDir()
-
-	// Populate enough files that there is meaningful work for Walk to do.
-	for _, name := range []string{
-		"a.cpp", "b.cpp", "c.cpp",
-		filepath.Join("src", "d.cpp"),
-		filepath.Join("src", "e.cpp"),
-		filepath.Join("include", "f.h"),
-	} {
-		mkFile(t, filepath.Join(root, name))
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	// Cancel before the walk starts so the context is already done on entry.
-	cancel()
-
-	ch, err := walker.Walk(ctx, root)
+	// ── Step 5: Format ────────────────────────────────────────────────────────
+	projectName := filepath.Base(dir)
+	report, err := formatter.Format(merged, projectName)
 	if err != nil {
-		// A non-nil error here means root was inaccessible — unexpected.
-		t.Fatalf("Walk returned unexpected setup error: %v", err)
+		return fmt.Errorf("formatting SBOM: %w", err)
 	}
 
-	// Drain the channel fully so the walker goroutine is not left blocked.
-	for range ch {
+	// ── Step 6: Write output ─────────────────────────────────────────────────
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serialising SBOM: %w", err)
 	}
 
-	// After the channel is closed, ctx.Err() reports the cancellation.
-	if ctx.Err() == nil {
-		t.Fatal("expected ctx.Err() to be non-nil after cancellation, got nil")
+	if err := os.WriteFile(outputPath, data, 0o644); err != nil {
+		return fmt.Errorf("writing %q: %w", outputPath, err)
 	}
-	if ctx.Err() != context.Canceled {
-		t.Errorf("expected context.Canceled, got %v", ctx.Err())
-	}
+
+	fmt.Fprintf(w, "SBOM written to %s\n", outputPath)
+	return nil
 }
