@@ -93,13 +93,7 @@ func parseConanFile(path string) ([]Dependency, error) {
 			continue
 		}
 
-		deps = append(deps, Dependency{
-			Name:       name,
-			Version:    version,
-			Sources:    []string{"conan"},
-			Evidence:   []string{path},
-			PackageURL: BuildPURL(name, version),
-		})
+		deps = append(deps, NewDependency(name, version, "conan", path))
 	}
 
 	return deps, scanner.Err()

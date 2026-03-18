@@ -121,13 +121,8 @@ func (s IncludeScanner) scanFiles(ctx context.Context, files []string, w io.Writ
 					dep.Evidence = append(dep.Evidence, r.path)
 				}
 			} else {
-				merged[name] = &Dependency{
-					Name:       name,
-					Version:    "unknown",
-					Sources:    []string{"include"},
-					Evidence:   []string{r.path},
-					PackageURL: BuildPURL(name, "unknown"),
-				}
+				d := NewDependency(name, "unknown", "include", r.path)
+				merged[name] = &d
 			}
 		}
 	}

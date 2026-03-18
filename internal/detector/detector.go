@@ -54,6 +54,18 @@ type Detector interface {
 	Detect(ctx context.Context, files []string) ([]Dependency, error)
 }
 
+// NewDependency constructs a Dependency with all required fields populated.
+// PackageURL is always set via BuildPURL, ensuring it is never empty or malformed.
+func NewDependency(name, version, source, evidence string) Dependency {
+	return Dependency{
+		Name:       name,
+		Version:    version,
+		Sources:    []string{source},
+		Evidence:   []string{evidence},
+		PackageURL: BuildPURL(name, version),
+	}
+}
+
 // BuildPURL constructs a Package URL in the format pkg:generic/<n>@<version>.
 // If version is empty the "@<version>" suffix is omitted.
 func BuildPURL(name, version string) string {

@@ -96,13 +96,7 @@ func parseVcpkgFile(path string, w io.Writer) ([]Dependency, error) {
 			continue
 		}
 
-		deps = append(deps, Dependency{
-			Name:       strings.ToLower(name),
-			Version:    version,
-			Sources:    []string{"vcpkg"},
-			Evidence:   []string{path},
-			PackageURL: BuildPURL(strings.ToLower(name), version),
-		})
+		deps = append(deps, NewDependency(strings.ToLower(name), version, "vcpkg", path))
 	}
 
 	return deps, nil

@@ -131,13 +131,8 @@ func parseCMakeFile(path string, deps map[string]*Dependency, w io.Writer) error
 				existing.PackageURL = BuildPURL(name, version)
 			}
 		} else {
-			deps[name] = &Dependency{
-				Name:       name,
-				Version:    version,
-				Sources:    []string{"cmake"},
-				Evidence:   []string{path},
-				PackageURL: BuildPURL(name, version),
-			}
+			d := NewDependency(name, version, "cmake", path)
+			deps[name] = &d
 		}
 	}
 
