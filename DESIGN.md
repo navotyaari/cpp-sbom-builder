@@ -6,12 +6,12 @@
 
 ### Implemented detectors
 
-| Detector | Signal source | Confidence |
-|---|---|---|
-| `VcpkgDetector` | `vcpkg.json` — structured JSON manifest | Highest |
-| `ConanDetector` | `conanfile.txt` — INI-style manifest | High |
-| `CMakeDetector` | `CMakeLists.txt`, `*.cmake` — `find_package()` calls | Medium |
-| `IncludeScanner` | `#include` directives in `.cpp/.cc/.cxx/.h/.hpp/.hxx` | Lowest |
+| Detector | Signal source | Match criterion | Confidence |
+|---|---|---|---|
+| `VcpkgDetector` | `vcpkg.json` — structured JSON manifest | Files named exactly `vcpkg.json` | Highest |
+| `ConanDetector` | `conanfile.txt` — INI-style manifest | Files named exactly `conanfile.txt` | High |
+| `CMakeDetector` | `CMakeLists.txt`, `*.cmake` — `find_package()` calls | Files named `CMakeLists.txt` or with a `.cmake` extension | Medium |
+| `IncludeScanner` | `#include` directives in `.cpp/.cc/.cxx/.h/.hpp/.hxx` | Files with a C++ source or header extension (`.cpp` `.cc` `.cxx` `.h` `.hpp` `.hxx`) | Lowest |
 
 **vcpkg** and **Conan** are the most reliable sources because they are explicit, machine-generated package manifests with structured name and version fields. Versions declared there are authoritative.
 
@@ -111,7 +111,9 @@ Several approaches would increase version coverage:
 >
 > This change was made during implementation to introduce a single shared `filepath.WalkDir` pass in `cmd/root.go`. The resulting flat, skip-dir-pruned file slice is passed to every detector instead of each detector walking the tree independently. This eliminates redundant I/O — the filesystem is traversed exactly once regardless of how many detectors run.
 
-All four detectors run in separate goroutines launched by `cmd.Run`. Rather than waiting for the full walk to complete, `cmd/root.go` starts the walk and immediately spins up a fan-out goroutine that reads each path from the walker's channel and forwards it to N per-detector buffered channels (one per detector). Each detector goroutine drains its channel into a local `[]string` then calls `Detect`. The walker, fan-out, and all detector goroutines run concurrently, so detectors begin accumulating their file lists while the tree is still being traversed. Results are sent into a buffered channel sized to the number of detectors so no goroutine ever blocks on send. A single closer goroutine calls `sync.WaitGroup.Wait()` then closes the channel, after which the main goroutine drains and merges results.
+All four detectors run in separate goroutines launched by `cmd.Run`. Rather than waiting for the full walk to complete, `cmd/root.go` starts the walk and immediately spins up a fan-out goroutine that reads each path from the walker's channel and routes it to the per-detector buffered channels of detectors whose `Match` method returns true for that path. Each detector goroutine drains its channel into a local `[]string` then calls `Detect`. The walker, fan-out, and all detector goroutines run concurrently, so detectors begin accumulating their file lists while the tree is still being traversed. Results are sent into a buffered channel sized to the number of detectors so no goroutine ever blocks on send. A single closer goroutine calls `sync.WaitGroup.Wait()` then closes the channel, after which the main goroutine drains and merges results.
+
+`Match` is called in the fan-out rather than inside each `Detect` implementation for two reasons: file relevance is a property of the detector and belongs in the interface as an explicit, testable contract, and calling it centrally in the fan-out means each file is filtered once per detector in a single place rather than each detector independently re-filtering the same list. `Match` is intentionally a fast check — a filename or extension string comparison — so it does not become a bottleneck on the fan-out critical path.
 
 This design means detector wall-clock time equals the slowest single detector, not their sum — on a 4-core machine scanning a 50k-file project this is roughly a 4× speedup over sequential execution.
 
