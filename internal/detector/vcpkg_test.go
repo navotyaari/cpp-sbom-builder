@@ -143,7 +143,8 @@ func TestVcpkgDetector_Detect_WritesWarningToW(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	d := detector.VcpkgDetector{W: &buf}
+	d := detector.VcpkgDetector{}
+	d.W = &buf
 	deps, detectErr := d.Detect(context.Background(), []string{bad})
 
 	if detectErr != nil {

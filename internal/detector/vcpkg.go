@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +15,7 @@ import (
 // JSON, or malformed dependency entries).  If W is nil, warnings are written
 // to os.Stderr.
 type VcpkgDetector struct {
-	W io.Writer
+	baseDetector
 }
 
 // Name implements Detector.
@@ -48,7 +47,6 @@ type vcpkgDepObject struct {
 // do not cause an error to be returned.
 func (v VcpkgDetector) Detect(ctx context.Context, files []string) ([]Dependency, error) {
 	var deps []Dependency
-	w := warnWriter(v.W)
 
 	for _, path := range files {
 		select {
@@ -61,9 +59,9 @@ func (v VcpkgDetector) Detect(ctx context.Context, files []string) ([]Dependency
 			continue
 		}
 
-		found, parseErr := parseVcpkgFile(path, w)
+		found, parseErr := parseVcpkgFile(path, v.warn)
 		if parseErr != nil {
-			fmt.Fprintf(w, "vcpkg detector: skipping %s: %v\n", path, parseErr)
+			v.warn("vcpkg detector: skipping %s: %v\n", path, parseErr)
 			continue // skip malformed files silently
 		}
 
@@ -74,8 +72,8 @@ func (v VcpkgDetector) Detect(ctx context.Context, files []string) ([]Dependency
 }
 
 // parseVcpkgFile decodes a single vcpkg.json and returns its dependencies.
-// Warnings about individual malformed entries are written to w.
-func parseVcpkgFile(path string, w io.Writer) ([]Dependency, error) {
+// Warnings about individual malformed entries are emitted via warn.
+func parseVcpkgFile(path string, warn func(string, ...any)) ([]Dependency, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -92,7 +90,7 @@ func parseVcpkgFile(path string, w io.Writer) ([]Dependency, error) {
 		name, version, err := decodeVcpkgDep(raw)
 		if err != nil {
 			// Individual malformed entry — skip and continue.
-			fmt.Fprintf(w, "vcpkg detector: skipping entry in %s: %v\n", path, err)
+			warn("vcpkg detector: skipping entry in %s: %v\n", path, err)
 			continue
 		}
 

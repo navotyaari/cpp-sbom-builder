@@ -3,8 +3,6 @@ package detector
 import (
 	"bufio"
 	"context"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,7 +40,7 @@ var cmakePseudoPackages = map[string]bool{
 // W is the writer used for per-file warning messages (unreadable files, scan
 // errors).  If W is nil, warnings are written to os.Stderr.
 type CMakeDetector struct {
-	W io.Writer
+	baseDetector
 }
 
 // Name implements Detector.
@@ -60,7 +58,6 @@ func (c CMakeDetector) Match(path string) bool {
 // calls from each, and returns one Dependency per unique normalised package name.
 func (c CMakeDetector) Detect(ctx context.Context, files []string) ([]Dependency, error) {
 	deps := map[string]*Dependency{}
-	w := warnWriter(c.W)
 
 	for _, path := range files {
 		select {
@@ -73,7 +70,7 @@ func (c CMakeDetector) Detect(ctx context.Context, files []string) ([]Dependency
 			continue
 		}
 
-		if err := parseCMakeFile(path, deps, w); err != nil {
+		if err := parseCMakeFile(path, deps, c.warn); err != nil {
 			return nil, err
 		}
 	}
@@ -91,11 +88,11 @@ func isCMakeFile(name string) bool {
 }
 
 // parseCMakeFile scans a single file and upserts entries into deps.
-// Warnings about unreadable files or scan errors are written to w.
-func parseCMakeFile(path string, deps map[string]*Dependency, w io.Writer) error {
+// Warnings about unreadable files or scan errors are emitted via warn.
+func parseCMakeFile(path string, deps map[string]*Dependency, warn func(string, ...any)) error {
 	f, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintf(w, "cmake detector: skipping %s: %v\n", path, err)
+		warn("cmake detector: skipping %s: %v\n", path, err)
 		return nil // unreadable file → skip silently
 	}
 	defer f.Close()
@@ -137,7 +134,7 @@ func parseCMakeFile(path string, deps map[string]*Dependency, w io.Writer) error
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(w, "cmake detector: skipping %s: %v\n", path, err)
+		warn("cmake detector: skipping %s: %v\n", path, err)
 	}
 	return nil
 }

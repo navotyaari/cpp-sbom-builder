@@ -214,7 +214,8 @@ func TestConanDetector_Detect_WritesWarningToW(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(unreadable, 0o644) })
 
 	var buf strings.Builder
-	d := detector.ConanDetector{W: &buf}
+	d := detector.ConanDetector{}
+	d.W = &buf
 	deps, detectErr := d.Detect(context.Background(), []string{unreadable})
 
 	if detectErr != nil {

@@ -72,12 +72,15 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 		return fmt.Errorf("walking %q: %w", dir, err)
 	}
 
-	detectors := []detector.Detector{
-		detector.CMakeDetector{W: w},
-		detector.VcpkgDetector{W: w},
-		detector.ConanDetector{W: w},
-		detector.IncludeScanner{W: w},
-	}
+	cmake := detector.CMakeDetector{}
+	cmake.W = w
+	vcpkg := detector.VcpkgDetector{}
+	vcpkg.W = w
+	conan := detector.ConanDetector{}
+	conan.W = w
+	includes := detector.IncludeScanner{}
+	includes.W = w
+	detectors := []detector.Detector{cmake, vcpkg, conan, includes}
 
 	detChans := fanOut(fileCh, detectors)
 

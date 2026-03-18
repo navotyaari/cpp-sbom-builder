@@ -580,7 +580,8 @@ func TestIncludeScanner_UnreadableFileWritesWarningToW(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(unreadable, 0o644) }) // allow t.TempDir cleanup
 
 	var buf strings.Builder
-	s := detector.IncludeScanner{W: &buf}
+	s := detector.IncludeScanner{}
+	s.W = &buf
 	deps, detectErr := s.Detect(context.Background(), []string{unreadable})
 
 	if detectErr != nil {

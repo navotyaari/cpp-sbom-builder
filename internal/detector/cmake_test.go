@@ -170,7 +170,8 @@ func TestCMakeDetector_Detect_WritesWarningToW(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(unreadable, 0o644) }) // allow t.TempDir cleanup
 
 	var buf strings.Builder
-	d := detector.CMakeDetector{W: &buf}
+	d := detector.CMakeDetector{}
+	d.W = &buf
 	_, detectErr := d.Detect(context.Background(), []string{unreadable})
 
 	if detectErr != nil {
