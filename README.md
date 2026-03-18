@@ -56,6 +56,67 @@ Expected output:
 SBOM written to sbom.json
 ```
 
+### Against a real-world project
+
+[Crow](https://github.com/CrowCpp/Crow) is a small, well-known open source C++ web framework that has both a
+`vcpkg.json` and a `CMakeLists.txt` with `find_package()` calls. Scanning it exercises the vcpkg detector,
+the CMake detector, and the include scanner simultaneously, and the merger's deduplication is visible in the
+output because the same dependencies appear across multiple manifest and source files.
+
+Crow is not included in this repository. Clone it yourself, then run the tool against it:
+
+```bash
+git clone https://github.com/CrowCpp/Crow.git --depth=1
+./cpp-sbom-builder --dir Crow --output crow-sbom.json
+```
+
+Expected output:
+
+```
+SBOM written to crow-sbom.json
+```
+
+#### What to verify
+
+Open `crow-sbom.json` and check the following.
+
+**Top-level envelope fields** — the document should open with:
+
+```json
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+```
+
+**Known dependencies from `vcpkg.json`** — Crow's manifest declares three direct dependencies.
+All three must appear as components:
+
+| Name | Expected in vcpkg.json | Expected in CMakeLists.txt |
+|------|------------------------|----------------------------|
+| `asio` | ✓ | ✓ (`find_package(asio)`) |
+| `openssl` | ✓ | ✓ (`find_package(OpenSSL)`, inside `CROW_ENABLE_SSL` block) |
+| `zlib` | ✓ | ✓ (`find_package(ZLIB)`, inside `CROW_ENABLE_COMPRESSION` block) |
+
+**Merger deduplication is working** — `asio`, `openssl`, and `zlib` each appear in both `vcpkg.json`
+and `CMakeLists.txt`. For each of those components, the `sources` array in the SBOM should contain
+more than one detector name (e.g. `["vcpkg", "cmake"]`), and the `occurrences` list in `evidence`
+should include paths to both files. If any of these components shows only a single source, the merger
+is not combining results correctly.
+
+**No stdlib false positives** — scan the component names and confirm that none of the following
+appear: `vector`, `string`, `iostream`, `algorithm`, `map`, `memory`. These are C++ standard library
+headers and must be filtered out by the include scanner.
+
+**No CMake pseudo-package false positives** — confirm that `threads`, `cmake`, `ctest`, and
+`packagehandlestandardargs` do not appear as components. These are CMake-internal module names
+that the CMake detector is required to suppress.
+
+**Component count is in a reasonable range** — a default-options `--depth=1` clone of Crow
+should produce approximately 5–8 components in total. The exact number depends on which
+third-party headers the include scanner resolves from Crow's `include/crow/` directory.
+A count significantly outside that range (for example, 0 or 50+) indicates a problem worth
+investigating.
+
 ### Against your own project
 
 ```bash
