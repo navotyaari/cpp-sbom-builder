@@ -42,6 +42,12 @@ type IncludeScanner struct {
 // Name implements Detector.
 func (s IncludeScanner) Name() string { return "include" }
 
+// Match implements Detector.
+// It returns true for files whose lowercased extension is in cppExtensions.
+func (s IncludeScanner) Match(path string) bool {
+	return cppExtensions[strings.ToLower(filepath.Ext(path))]
+}
+
 // fileResult carries per-file scan output back to the collector goroutine.
 type fileResult struct {
 	path  string
@@ -56,7 +62,7 @@ func (s IncludeScanner) Detect(ctx context.Context, files []string) ([]Dependenc
 	// Filter to C++ source and header files only.
 	var candidates []string
 	for _, path := range files {
-		if cppExtensions[strings.ToLower(filepath.Ext(path))] {
+		if s.Match(path) {
 			candidates = append(candidates, path)
 		}
 	}

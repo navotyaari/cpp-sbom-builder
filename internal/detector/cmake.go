@@ -48,6 +48,13 @@ type CMakeDetector struct {
 // Name implements Detector.
 func (c CMakeDetector) Name() string { return "cmake" }
 
+// Match implements Detector.
+// It returns true for files named CMakeLists.txt or with a .cmake extension
+// (case insensitive).
+func (c CMakeDetector) Match(path string) bool {
+	return isCMakeFile(filepath.Base(path))
+}
+
 // Detect implements Detector.
 // It filters files for CMakeLists.txt / *.cmake paths, extracts find_package()
 // calls from each, and returns one Dependency per unique normalised package name.
@@ -62,7 +69,7 @@ func (c CMakeDetector) Detect(ctx context.Context, files []string) ([]Dependency
 		default:
 		}
 
-		if !isCMakeFile(filepath.Base(path)) {
+		if !c.Match(path) {
 			continue
 		}
 

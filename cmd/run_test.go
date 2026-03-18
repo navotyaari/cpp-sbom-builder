@@ -82,6 +82,51 @@ func TestRun_SkipDirContentsNotDetected(t *testing.T) {
 	}
 }
 
+// TestRun_MatchRoutingIsRespected verifies that the fan-out routing via Match
+// correctly delivers each file to its appropriate detector. A vcpkg.json and
+// a conanfile.txt with distinct dependencies are both present; the SBOM must
+// contain a component from each, proving that Match-based routing works end-to-end.
+func TestRun_MatchRoutingIsRespected(t *testing.T) {
+	root := t.TempDir()
+
+	vcpkgContent := `{"dependencies":["vcpkg-routed-dep"]}`
+	if err := os.WriteFile(filepath.Join(root, "vcpkg.json"), []byte(vcpkgContent), 0o644); err != nil {
+		t.Fatalf("WriteFile vcpkg.json: %v", err)
+	}
+
+	conanContent := "[requires]\nconan-routed-dep/1.0.0\n"
+	if err := os.WriteFile(filepath.Join(root, "conanfile.txt"), []byte(conanContent), 0o644); err != nil {
+		t.Fatalf("WriteFile conanfile.txt: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "sbom.json")
+	var buf strings.Builder
+	if err := Run(context.Background(), &buf, root, outputPath); err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	var report formatter.SBOMReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	byName := make(map[string]bool, len(report.Components))
+	for _, c := range report.Components {
+		byName[c.Name] = true
+	}
+
+	for _, want := range []string{"vcpkg-routed-dep", "conan-routed-dep"} {
+		if !byName[want] {
+			t.Errorf("component %q missing from SBOM; fan-out Match routing may be broken. got: %v", want, report.Components)
+		}
+	}
+}
+
 // TestRun_ContextCancellation verifies that Run returns context.Canceled when
 // the context is cancelled before the call. The walker checks ctx.Done on
 // every entry, so a pre-cancelled context causes the walk to abort immediately

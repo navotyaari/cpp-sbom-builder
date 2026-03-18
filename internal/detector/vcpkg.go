@@ -22,6 +22,12 @@ type VcpkgDetector struct {
 // Name implements Detector.
 func (v VcpkgDetector) Name() string { return "vcpkg" }
 
+// Match implements Detector.
+// It returns true for files named exactly "vcpkg.json".
+func (v VcpkgDetector) Match(path string) bool {
+	return filepath.Base(path) == "vcpkg.json"
+}
+
 // vcpkgManifest is the subset of vcpkg.json we care about.
 // The "dependencies" array may hold either plain strings or objects, so each
 // element is decoded into a raw json.RawMessage and handled separately.
@@ -51,7 +57,7 @@ func (v VcpkgDetector) Detect(ctx context.Context, files []string) ([]Dependency
 		default:
 		}
 
-		if filepath.Base(path) != "vcpkg.json" {
+		if !v.Match(path) {
 			continue
 		}
 

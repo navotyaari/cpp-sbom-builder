@@ -44,6 +44,29 @@ func listFiles(t *testing.T, root string) []string {
 	return paths
 }
 
+func TestCMakeDetector_Match(t *testing.T) {
+	d := detector.CMakeDetector{}
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "CMakeLists.txt", want: true},
+		{path: "foo.cmake", want: true},
+		{path: "FOO.CMAKE", want: true}, // case insensitive
+		{path: "vcpkg.json", want: false},
+		{path: "main.cpp", want: false},
+		{path: "", want: false},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			if got := d.Match(tc.path); got != tc.want {
+				t.Errorf("Match(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCMakeDetector_Name(t *testing.T) {
 	d := detector.CMakeDetector{}
 	if got := d.Name(); got != "cmake" {

@@ -12,6 +12,35 @@ import (
 	"cpp-sbom-builder/internal/detector"
 )
 
+// ── Match ─────────────────────────────────────────────────────────────────────
+
+func TestIncludeScanner_Match(t *testing.T) {
+	s := detector.IncludeScanner{}
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "main.cpp", want: true},
+		{path: "util.hpp", want: true},
+		{path: "header.h", want: true},
+		{path: "file.cc", want: true},
+		{path: "file.cxx", want: true},
+		{path: "file.hxx", want: true},
+		{path: "CMakeLists.txt", want: false},
+		{path: "vcpkg.json", want: false},
+		{path: "main.go", want: false},
+		{path: "", want: false},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			if got := s.Match(tc.path); got != tc.want {
+				t.Errorf("Match(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 // ── DepNameFromHeader ─────────────────────────────────────────────────────────
 
 func TestDepNameFromHeader(t *testing.T) {

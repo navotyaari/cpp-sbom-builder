@@ -10,6 +10,27 @@ import (
 	"cpp-sbom-builder/internal/detector"
 )
 
+func TestVcpkgDetector_Match(t *testing.T) {
+	d := detector.VcpkgDetector{}
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "vcpkg.json", want: true},
+		{path: "vcpkg.configuration.json", want: false},
+		{path: "CMakeLists.txt", want: false},
+		{path: "", want: false},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			if got := d.Match(tc.path); got != tc.want {
+				t.Errorf("Match(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestVcpkgDetector_Name(t *testing.T) {
 	d := detector.VcpkgDetector{}
 	if got := d.Name(); got != "vcpkg" {

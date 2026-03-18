@@ -39,6 +39,15 @@ type Detector interface {
 	// Name returns a short, stable identifier for the detector (e.g. "cmake").
 	Name() string
 
+	// Match reports whether the file at path is relevant to this detector.
+	// The fan-out in cmd/root.go calls Match before routing each file, so
+	// Detect can assume every file it receives has already passed Match.
+	//
+	// Convention: Match must be a fast check (filename or extension
+	// comparison) since it is called once per file per detector in the
+	// fan-out critical path.
+	Match(path string) bool
+
 	// Detect scans the provided file list and returns all dependencies it can
 	// identify.  files contains absolute paths; the caller guarantees that
 	// skip-listed directories have already been pruned.

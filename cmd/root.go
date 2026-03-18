@@ -97,9 +97,14 @@ func Run(ctx context.Context, w io.Writer, dir, outputPath string) error {
 }
 
 // fanOut creates one buffered channel per detector, launches a goroutine that
-// broadcasts every path received from fileCh to all per-detector channels, and
-// returns the channel slice. The broadcast goroutine closes all per-detector
-// channels once fileCh is drained.
+// routes each path received from fileCh only to detectors whose Match returns
+// true, and returns the channel slice. The fan-out goroutine closes all
+// per-detector channels once fileCh is drained.
+//
+// Match is called here rather than inside each Detect implementation: it is
+// intentionally cheap (a string comparison) so it does not become a bottleneck
+// on the fan-out critical path, and calling it here reduces channel traffic so
+// each file reaches only the detectors that care about it.
 //
 // detectorChBuf is sized to match the walker's own buffer so the fan-out
 // goroutine can keep pace with the walker without blocking even if one detector
@@ -113,18 +118,16 @@ func fanOut(fileCh chan string, detectors []detector.Detector) []chan string {
 
 	go func() {
 		for path := range fileCh {
-			// Blocking send — no select or cancellation check needed here.
-			// All detector goroutines are already running (launched in
-			// runDetectors) and continuously draining their channels, so each
-			// send completes as soon as the receiving goroutine's next loop
-			// iteration fires or the per-detector buffer has room. If a detector
-			// goroutine were to stop draining (e.g. due to a panic), this send
-			// would block indefinitely, stalling the fan-out and walker
-			// goroutines. That is a known limitation: the design assumes all
-			// detector goroutines run to completion, which is enforced by the
-			// WaitGroup inside runDetectors.
-			for _, dc := range detChans {
-				dc <- path
+			// Send each path only to detectors that match it. Match is a fast
+			// string comparison (nanoseconds) so the fan-out goroutine is never
+			// the bottleneck. The blocking send below is safe because all
+			// detector goroutines (launched in runDetectors) continuously drain
+			// their channels; a detector goroutine stalling would block the
+			// fan-out, which is a known limitation of the design.
+			for i, d := range detectors {
+				if d.Match(path) {
+					detChans[i] <- path
+				}
 			}
 		}
 		for _, dc := range detChans {

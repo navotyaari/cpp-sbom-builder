@@ -11,6 +11,27 @@ import (
 	"cpp-sbom-builder/internal/detector"
 )
 
+func TestConanDetector_Match(t *testing.T) {
+	d := detector.ConanDetector{}
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "conanfile.txt", want: true},
+		{path: "conanfile.py", want: false},
+		{path: "CMakeLists.txt", want: false},
+		{path: "", want: false},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			if got := d.Match(tc.path); got != tc.want {
+				t.Errorf("Match(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConanDetector_Name(t *testing.T) {
 	d := detector.ConanDetector{}
 	if got := d.Name(); got != "conan" {

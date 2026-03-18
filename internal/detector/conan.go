@@ -21,6 +21,12 @@ type ConanDetector struct {
 // Name implements Detector.
 func (c ConanDetector) Name() string { return "conan" }
 
+// Match implements Detector.
+// It returns true for files named exactly "conanfile.txt".
+func (c ConanDetector) Match(path string) bool {
+	return filepath.Base(path) == "conanfile.txt"
+}
+
 // Detect implements Detector.
 // It filters files for paths named exactly "conanfile.txt", parses the
 // [requires] section of each, and returns one Dependency per entry.
@@ -35,7 +41,7 @@ func (c ConanDetector) Detect(ctx context.Context, files []string) ([]Dependency
 		default:
 		}
 
-		if filepath.Base(path) != "conanfile.txt" {
+		if !c.Match(path) {
 			continue
 		}
 
